@@ -74,17 +74,19 @@ function mlGenPullCmd() {
 
     function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
 
-    var cmd = 'wp eval-file ' + sq(migrateLite.pullScript) + ' -- \\\n'
+    var wpPath = ' --path=' + sq(migrateLite.abspath);
+
+    var cmd = 'wp' + wpPath + ' eval-file ' + sq(migrateLite.pullScript) + ' -- \\\n'
         + '  --worker=' + sq(workerUrl) + ' \\\n'
         + '  --token=' + sq(token) + ' \\\n'
         + '  --site-id=' + sq(siteId) + ' \\\n'
         + '  --batch-id=' + sq(batchId) + ' \\\n'
         + '  --search=' + sq(srcUrl) + ' \\\n'
-        + '  --replace="$(wp option get siteurl)"';
+        + '  --replace="$(wp' + wpPath + ' option get siteurl)"';
 
     if (srcPath) {
         cmd += ' \\\n  --search-path=' + sq(srcPath)
-            + ' \\\n  --replace-path="$(wp eval \'echo rtrim(ABSPATH, \"/\");\')"';
+            + ' \\\n  --replace-path=' + sq(migrateLite.abspath);
     }
 
     el.style.display = 'block';

@@ -28,6 +28,7 @@ class ML_Admin {
             'nonce'    => wp_create_nonce('migrate_lite'),
             'siteId'   => $site_id,
             'pullScript' => ML_PATH . 'pull-cli.php',
+            'abspath'    => rtrim(ABSPATH, '/'),
         ]); ?>;
         </script>
 

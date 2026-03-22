@@ -10,20 +10,20 @@
  *     [--search-path=/old/path --replace-path=/new/path]
  */
 
-// Parse args
+// Parse args: env vars take precedence, CLI args as fallback
 $args = [];
 foreach ($GLOBALS['argv'] ?? [] as $arg) {
     if (preg_match('/^--([^=]+)=(.*)$/', $arg, $m)) $args[$m[1]] = $m[2];
 }
 
-$worker       = rtrim($args['worker'] ?? '', '/');
-$token        = $args['token'] ?? '';
-$site_id      = $args['site-id'] ?? '';
-$batch_id     = $args['batch-id'] ?? '';
-$search       = $args['search'] ?? '';
-$replace      = $args['replace'] ?? '';
-$search_path  = $args['search-path'] ?? '';
-$replace_path = $args['replace-path'] ?? '';
+$worker       = rtrim(getenv('MIGRATE_WORKER') ?: ($args['worker'] ?? ''), '/');
+$token        = getenv('MIGRATE_TOKEN') ?: ($args['token'] ?? '');
+$site_id      = getenv('MIGRATE_SITE_ID') ?: ($args['site-id'] ?? '');
+$batch_id     = getenv('MIGRATE_BATCH_ID') ?: ($args['batch-id'] ?? '');
+$search       = getenv('MIGRATE_SEARCH') ?: ($args['search'] ?? '');
+$replace      = getenv('MIGRATE_REPLACE') ?: ($args['replace'] ?? '');
+$search_path  = getenv('MIGRATE_SEARCH_PATH') ?: ($args['search-path'] ?? '');
+$replace_path = getenv('MIGRATE_REPLACE_PATH') ?: ($args['replace-path'] ?? '');
 
 if (!$worker || !$token || !$site_id || !$batch_id || !$search || !$replace) {
     WP_CLI::error('Required: --worker, --token, --site-id, --batch-id, --search, --replace');

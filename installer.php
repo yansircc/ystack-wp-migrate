@@ -7,6 +7,8 @@
  */
 
 define('INSTALLER_TOKEN', ''); // Set before uploading
+define('R2_WORKER', 'https://wp-migrate-proxy.yansir.workers.dev');
+define('R2_TOKEN', '0e7ddc9b3956aafba3b24a1c39d7775edbcb6887f20bc873594ce376b8e219dc');
 
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
@@ -103,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                     }
                 }
 
-                $dl = $engine->download($_POST['worker'] ?? '', $_POST['r2_token'] ?? '', $_POST['site_id'] ?? '', $_POST['batch_id'] ?? '');
+                $dl = $engine->download(R2_WORKER, R2_TOKEN, $_POST['site_id'] ?? '', $_POST['batch_id'] ?? '');
                 echo json_encode(['ok' => true, 'msg' => implode(', ', $dl)]);
                 break;
             case 'import':
@@ -173,8 +175,6 @@ button{background:#89b4fa;color:#1e1e2e;border:none;padding:.6rem 1.5rem;border-
 <h1>WP Migrate Lite — Installer</h1>
 <div class="card">
     <label>Installer Token</label><input type="password" id="token">
-    <label>Worker URL</label><input type="url" id="worker">
-    <label>R2 Auth Token</label><input type="text" id="r2token">
     <label>Source Site ID</label><input type="text" id="siteid">
     <label>Batch ID</label><input type="text" id="batchid">
     <label>Source URL</label><input type="url" id="search">
@@ -188,12 +188,11 @@ function log(m,c){var e=document.getElementById('log');e.style.display='block';e
 function post(d){d.token=document.getElementById('token').value;d.wp_content_dir=document.getElementById('wpcontentdir').value;return fetch(location.href,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(d)}).then(r=>r.json())}
 async function run(){
     document.getElementById('log').innerHTML='';
-    var w=document.getElementById('worker').value,t=document.getElementById('r2token').value,
-        si=document.getElementById('siteid').value,bi=document.getElementById('batchid').value,
+    var si=document.getElementById('siteid').value,bi=document.getElementById('batchid').value,
         s=document.getElementById('search').value,sp=document.getElementById('searchpath').value;
-    if(!w||!t||!si||!bi||!s){alert('Fill required fields');return}
+    if(!si||!bi||!s){alert('Fill Site ID, Batch ID, and Source URL');return}
     var steps=[
-        {step:'download',label:'Downloading',data:{worker:w,r2_token:t,site_id:si,batch_id:bi}},
+        {step:'download',label:'Downloading',data:{site_id:si,batch_id:bi}},
         {step:'import',label:'Importing DB'},
         {step:'extract',label:'Extracting files'},
         {step:'replace',label:'Search-replace',data:{search:s,search_path:sp}},

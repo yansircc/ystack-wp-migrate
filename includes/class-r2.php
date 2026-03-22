@@ -5,13 +5,20 @@
  */
 class ML_R2 {
 
+    // Built-in R2 credentials — no user configuration needed
+    private const DEFAULT_WORKER = 'https://wp-migrate-proxy.yansir.workers.dev';
+    private const DEFAULT_TOKEN  = '0e7ddc9b3956aafba3b24a1c39d7775edbcb6887f20bc873594ce376b8e219dc';
+
     private string $worker_url;
     private string $auth_token;
 
-    public function __construct(string $worker_url, string $auth_token) {
-        $this->worker_url = rtrim($worker_url, '/');
-        $this->auth_token = $auth_token;
+    public function __construct(string $worker_url = '', string $auth_token = '') {
+        $this->worker_url = rtrim($worker_url ?: self::DEFAULT_WORKER, '/');
+        $this->auth_token = $auth_token ?: self::DEFAULT_TOKEN;
     }
+
+    public static function default_worker(): string { return self::DEFAULT_WORKER; }
+    public static function default_token(): string { return self::DEFAULT_TOKEN; }
 
     public function put(string $key, string $file_path): int {
         $fp = @fopen($file_path, 'r');
@@ -66,5 +73,17 @@ class ML_R2 {
         curl_close($ch);
         fclose($fp);
         return $code;
+    }
+
+    public function delete(string $key): void {
+        $ch = curl_init("{$this->worker_url}/{$key}");
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST  => 'DELETE',
+            CURLOPT_HTTPHEADER     => ["Authorization: Bearer {$this->auth_token}"],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 30,
+        ]);
+        curl_exec($ch);
+        curl_close($ch);
     }
 }

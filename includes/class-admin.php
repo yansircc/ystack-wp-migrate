@@ -1,13 +1,13 @@
 <?php
 /**
- * Admin page: settings, Push GUI, Pull command generator.
+ * Admin page: Push GUI + Pull command generator.
+ * R2 credentials are built into ML_R2 — no user configuration needed.
  */
 class ML_Admin {
 
     public function __construct() {
         add_action('admin_menu', [$this, 'register_page']);
-        add_action('wp_ajax_migrate_lite_save_settings', [$this, 'ajax_save_settings']);
-        add_action('wp_ajax_migrate_lite_push_step',     [$this, 'ajax_push_step']);
+        add_action('wp_ajax_migrate_lite_push_step', [$this, 'ajax_push_step']);
     }
 
     public function register_page(): void {
@@ -15,34 +15,24 @@ class ML_Admin {
     }
 
     public function render(): void {
-        $worker_url = get_option('migrate_lite_worker_url', '');
-        $auth_token = get_option('migrate_lite_auth_token', '');
-        $site_id    = sanitize_title(parse_url(home_url(), PHP_URL_HOST));
-        $plugin_dir = plugin_dir_path(dirname(__FILE__));
+        $site_id = sanitize_title(parse_url(home_url(), PHP_URL_HOST));
 
         ?>
         <style><?php readfile(ML_PATH . 'assets/admin.css'); ?></style>
         <script>
         var migrateLite = <?php echo json_encode([
-            'ajaxurl' => admin_url('admin-ajax.php'),
-            'nonce'    => wp_create_nonce('migrate_lite'),
-            'siteId'   => $site_id,
+            'ajaxurl'    => admin_url('admin-ajax.php'),
+            'nonce'      => wp_create_nonce('migrate_lite'),
+            'siteId'     => $site_id,
             'pullScript' => ML_PATH . 'pull-cli.php',
             'abspath'    => rtrim(ABSPATH, '/'),
+            'workerUrl'  => ML_R2::default_worker(),
+            'authToken'  => ML_R2::default_token(),
         ]); ?>;
         </script>
 
         <div class="wrap">
             <h1>Migrate Lite</h1>
-
-            <div class="ml-card">
-                <h2>R2 Connection</h2>
-                <table class="form-table">
-                    <tr><th>Worker URL</th><td><input type="url" id="ml-worker-url" value="<?php echo esc_attr($worker_url); ?>" class="regular-text" /></td></tr>
-                    <tr><th>Auth Token</th><td><input type="text" id="ml-auth-token" value="<?php echo esc_attr($auth_token); ?>" class="regular-text" /></td></tr>
-                </table>
-                <p><button class="button-primary" onclick="mlSaveSettings()">Save</button></p>
-            </div>
 
             <div class="ml-card">
                 <h2>Push to R2</h2>
@@ -53,7 +43,7 @@ class ML_Admin {
 
             <div class="ml-card">
                 <h2>Pull from R2</h2>
-                <p class="description">Run this command on the target site to pull data from R2.</p>
+                <p class="description">Run the generated command on the target site.</p>
                 <table class="form-table">
                     <tr><th>Source Site ID</th><td><input type="text" id="ml-pull-site-id" class="regular-text" placeholder="e.g. <?php echo $site_id; ?>" /></td></tr>
                     <tr><th>Batch ID</th><td><input type="text" id="ml-pull-batch-id" class="regular-text" placeholder="from push output" /></td></tr>
@@ -69,14 +59,6 @@ class ML_Admin {
         <?php
     }
 
-    public function ajax_save_settings(): void {
-        check_ajax_referer('migrate_lite', 'nonce');
-        if (!current_user_can('manage_options')) wp_send_json_error('Forbidden');
-        update_option('migrate_lite_worker_url', sanitize_url($_POST['worker_url']));
-        update_option('migrate_lite_auth_token', sanitize_text_field($_POST['auth_token']));
-        wp_send_json_success('Saved');
-    }
-
     public function ajax_push_step(): void {
         check_ajax_referer('migrate_lite', 'nonce');
         if (!current_user_can('manage_options')) wp_send_json_error('Forbidden');
@@ -87,14 +69,14 @@ class ML_Admin {
             $step = sanitize_text_field($_POST['step'] ?? '');
 
             if ($step === 'init') {
-                $push = new ML_Push($this->r2());
+                $push = new ML_Push(new ML_R2());
                 wp_send_json_success(['batch_id' => $push->batch_id()]);
                 return;
             }
 
             $batch_id = sanitize_text_field($_POST['batch_id'] ?? '');
             if (!$batch_id) wp_send_json_error('batch_id required');
-            $push = new ML_Push($this->r2(), $batch_id);
+            $push = new ML_Push(new ML_R2(), $batch_id);
 
             switch ($step) {
                 case 'db':
@@ -114,12 +96,5 @@ class ML_Admin {
         } catch (\Throwable $e) {
             wp_send_json_error($e->getMessage());
         }
-    }
-
-    private function r2(): ML_R2 {
-        return new ML_R2(
-            get_option('migrate_lite_worker_url', ''),
-            get_option('migrate_lite_auth_token', '')
-        );
     }
 }

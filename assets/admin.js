@@ -17,13 +17,6 @@ function mlAjax(action, data) {
     }).then(function (r) { return r.json(); });
 }
 
-function mlSaveSettings() {
-    mlAjax('save_settings', {
-        worker_url: document.getElementById('ml-worker-url').value,
-        auth_token: document.getElementById('ml-auth-token').value
-    }).then(function (r) { alert(r.success ? 'Saved!' : 'Error: ' + r.data); });
-}
-
 async function mlPush() {
     var log = 'ml-push-log';
     document.getElementById(log).innerHTML = '';
@@ -53,9 +46,18 @@ async function mlPush() {
     mlLog(log, '✓ ' + r.data, 'ml-ok');
     mlLog(log, '🎉 Push complete! Site: ' + migrateLite.siteId + ' / Batch: ' + batchId, 'ml-ok');
 
-    // Auto-fill pull command batch ID
-    var batchInput = document.getElementById('ml-pull-batch-id');
-    if (batchInput) batchInput.value = batchId;
+    // Auto-fill pull fields from push context
+    var fields = {
+        'ml-pull-site-id': migrateLite.siteId,
+        'ml-pull-batch-id': batchId,
+        'ml-pull-source-url': location.origin,
+        'ml-pull-source-path': migrateLite.abspath
+    };
+    for (var id in fields) {
+        var el = document.getElementById(id);
+        if (el) el.value = fields[id];
+    }
+    mlGenPullCmd();
 }
 
 function mlGenPullCmd() {
@@ -64,8 +66,6 @@ function mlGenPullCmd() {
     var batchId = document.getElementById('ml-pull-batch-id').value;
     var srcUrl = document.getElementById('ml-pull-source-url').value;
     var srcPath = document.getElementById('ml-pull-source-path').value;
-    var workerUrl = document.getElementById('ml-worker-url').value;
-    var token = document.getElementById('ml-auth-token').value;
 
     if (!siteId || !batchId || !srcUrl) {
         alert('Site ID, Batch ID, and Source URL are required');
@@ -73,12 +73,9 @@ function mlGenPullCmd() {
     }
 
     function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
-
     var wpPath = ' --path=' + sq(migrateLite.abspath);
 
     var cmd = 'wp' + wpPath + ' eval-file ' + sq(migrateLite.pullScript) + ' -- \\\n'
-        + '  --worker=' + sq(workerUrl) + ' \\\n'
-        + '  --token=' + sq(token) + ' \\\n'
         + '  --site-id=' + sq(siteId) + ' \\\n'
         + '  --batch-id=' + sq(batchId) + ' \\\n'
         + '  --search=' + sq(srcUrl) + ' \\\n'
@@ -90,6 +87,6 @@ function mlGenPullCmd() {
     }
 
     el.style.display = 'block';
-    el.innerHTML = '<div class="ml-info">Run this on the target site:</div>'
+    el.innerHTML = '<div class="ml-info">Run on the target site:</div>'
         + '<pre style="white-space:pre-wrap;word-break:break-all;user-select:all">' + cmd + '</pre>';
 }

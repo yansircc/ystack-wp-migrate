@@ -201,8 +201,9 @@ class ML_DB {
                     );
                 }
             } else {
-                // Cannot determine docroot — use system temp dir as safe fallback
-                $dir = sys_get_temp_dir() . '/.migrate-lite';
+                // Cannot determine docroot — use system temp dir scoped to this install
+                $install_hash = substr(md5(realpath(ABSPATH) ?: ABSPATH), 0, 12);
+                $dir = sys_get_temp_dir() . '/.migrate-lite-' . $install_hash;
             }
         }
 

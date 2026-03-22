@@ -44,14 +44,17 @@ async function mlPush() {
     r = await mlAjax('push_step', { step: 'manifest', batch_id: batchId });
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
     mlLog(log, '✓ ' + r.data, 'ml-ok');
+
+    var migrateCode = migrateLite.siteId + '/' + batchId;
     mlLog(log, '🎉 Push complete!', 'ml-ok');
+    mlLog(log, 'Migration code: ' + migrateCode, 'ml-info');
 
     mlShowPullCmd(batchId);
 }
 
 function mlShowPullCmd(batchId) {
+    var card = document.getElementById('ml-pull-card');
     var el = document.getElementById('ml-pull-cmd');
-    var hint = document.getElementById('ml-pull-hint');
     function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
 
     var cmd = 'wp eval-file ' + sq(migrateLite.pullScript) + ' -- \\\n'
@@ -62,7 +65,7 @@ function mlShowPullCmd(batchId) {
         + '  --search-path=' + sq(migrateLite.abspath) + ' \\\n'
         + '  --replace-path="$(wp eval \'echo rtrim(ABSPATH, \"/\");\')"';
 
-    if (hint) hint.textContent = 'Copy and run on the target site:';
+    if (card) card.style.display = '';
     el.style.display = 'block';
     el.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-all;user-select:all;margin:0">' + cmd + '</pre>';
 }

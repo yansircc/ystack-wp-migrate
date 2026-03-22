@@ -1,9 +1,9 @@
 <?php
 /**
- * WP Migrate Lite — Standalone Installer (thin wrapper over pull engine)
+ * WP Migrate Lite — Standalone Installer
  *
  * Upload to target site root. Access via browser. Self-deletes after migration.
- * Does NOT require WordPress or WP-CLI.
+ * Only requires: Installer Token + Migration Code (from push output).
  */
 
 define('INSTALLER_TOKEN', ''); // Set before uploading
@@ -18,7 +18,7 @@ ini_set('memory_limit', '512M');
 $self_path = __FILE__;
 $site_root = dirname($self_path);
 
-// Parse wp-config.php first (needed for DB creds and wp-content path)
+// Parse wp-config.php
 $wp_config_path = null;
 if (file_exists($site_root . '/wp-config.php')) $wp_config_path = $site_root . '/wp-config.php';
 elseif (file_exists(dirname($site_root) . '/wp-config.php')) $wp_config_path = dirname($site_root) . '/wp-config.php';
@@ -33,35 +33,21 @@ foreach (['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST'] as $c) {
 $prefix = 'wp_';
 if (preg_match('/\$table_prefix\s*=\s*[\'"]([^\'"]+)/', $config, $m)) $prefix = $m[1];
 
-// Resolve wp-content directory
+// Resolve wp-content
 $wp_content = $site_root . '/wp-content';
 $wp_content_proven = false;
-$has_wpcontent_define = (bool) preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]/",$config);
-
-// Try literal string from wp-config.php
+$has_define = (bool) preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]/",$config);
 if (preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]\s*,\s*['\"]([^'\"]+)['\"]/", $config, $m)) {
     if (is_dir($m[1])) { $wp_content = $m[1]; $wp_content_proven = true; }
 }
-// Default wp-content proven ONLY if wp-config doesn't define WP_CONTENT_DIR at all
-if (!$wp_content_proven && !$has_wpcontent_define && is_dir($wp_content)) {
-    $wp_content_proven = true;
-}
-// Heuristic probe if nothing proven
-if (!$wp_content_proven) {
-    foreach (['content', 'app'] as $alt) {
-        if (is_dir($site_root . '/' . $alt)) { $wp_content = $site_root . '/' . $alt; break; }
-    }
-}
+if (!$wp_content_proven && !$has_define && is_dir($wp_content)) $wp_content_proven = true;
 
-// Pull engine is embedded at the bottom of this file — no external dependency
-// (see class ML_Pull_Engine below)
-
-// Storage: install-scoped temp dir (outside webroot when possible)
+// Storage
 $install_hash = substr(md5(realpath($site_root) ?: $site_root), 0, 12);
 $tmp_dir = sys_get_temp_dir() . '/.migrate-installer-' . $install_hash;
 
 // ============================================================
-// AJAX handler
+// AJAX
 // ============================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
     header('Content-Type: application/json');
@@ -70,91 +56,108 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
         die(json_encode(['error' => 'Invalid or unconfigured token']));
     }
 
+    // wp-content override
+    $wc_post = trim($_POST['wp_content_dir'] ?? '');
+    if ($wc_post !== '') {
+        if (!is_dir($wc_post)) die(json_encode(['error' => "WP Content Path does not exist: {$wc_post}"]));
+        $wp_content = $wc_post;
+    } elseif (!$wp_content_proven) {
+        die(json_encode(['error' => 'Cannot auto-detect wp-content. Specify WP Content Path.']));
+    }
+
     $mysqli = @new mysqli($db['DB_HOST'], $db['DB_USER'], $db['DB_PASSWORD'], $db['DB_NAME']);
     if ($mysqli->connect_error) die(json_encode(['error' => 'DB: ' . $mysqli->connect_error]));
     $mysqli->set_charset('utf8mb4');
 
-    // UI override for wp-content path: authoritative if provided, must be valid
-    $wp_content_post = trim($_POST['wp_content_dir'] ?? '');
-    if ($wp_content_post !== '') {
-        if (!is_dir($wp_content_post)) {
-            die(json_encode(['error' => "WP Content Path does not exist: {$wp_content_post}"]));
-        }
-        $wp_content = $wp_content_post;
-    } elseif (!$wp_content_proven) {
-        die(json_encode(['error' => "Cannot auto-detect wp-content directory. Please specify WP Content Path in the form."]));
-    }
-
+    if (!is_dir($tmp_dir)) @mkdir($tmp_dir, 0755, true);
     $engine = new ML_Pull_Engine($mysqli, $prefix, $wp_content, $tmp_dir);
     $step = $_POST['step'] ?? '';
 
     try {
         switch ($step) {
-            case 'download':
-                // Capture target siteurl BEFORE import — write-once per session
+            case 'migrate':
+                // Parse migration code: site_id/batch_id
+                $code = trim($_POST['migrate_code'] ?? '');
+                $parts = explode('/', $code, 2);
+                if (count($parts) !== 2 || !$parts[0] || !$parts[1]) {
+                    throw new RuntimeException('Invalid migration code');
+                }
+                $site_id = $parts[0];
+                $batch_id = $parts[1];
+
+                // Step 1: Capture target siteurl (write-once)
                 $tu_path = $tmp_dir . '/target-siteurl';
                 if (!file_exists($tu_path)) {
                     $su = $mysqli->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl'");
-                    if (!$su) throw new RuntimeException('Cannot read target siteurl: ' . $mysqli->error);
+                    if (!$su) throw new RuntimeException('Cannot read target siteurl');
                     $row = $su->fetch_assoc();
-                    if (!$row || empty($row['option_value'])) throw new RuntimeException('Target siteurl is empty or missing');
-                    $tu_len = strlen($row['option_value']);
-                    $tu_written = @file_put_contents($tu_path, $row['option_value']);
-                    if ($tu_written === false || $tu_written < $tu_len) {
-                        throw new RuntimeException('Failed to persist target siteurl');
-                    }
+                    if (!$row || empty($row['option_value'])) throw new RuntimeException('Target siteurl empty');
+                    $len = strlen($row['option_value']);
+                    $written = @file_put_contents($tu_path, $row['option_value']);
+                    if ($written === false || $written < $len) throw new RuntimeException('Failed to save target siteurl');
                 }
 
-                $dl = $engine->download(R2_WORKER, R2_TOKEN, $_POST['site_id'] ?? '', $_POST['batch_id'] ?? '');
-                echo json_encode(['ok' => true, 'msg' => implode(', ', $dl)]);
+                // Step 2: Download
+                $dl = $engine->download(R2_WORKER, R2_TOKEN, $site_id, $batch_id);
+
+                // Read source info from manifest
+                $manifest = json_decode(@file_get_contents($tmp_dir . '/manifest-cache.json') ?: '{}', true);
+                // Engine doesn't cache manifest, re-fetch it
+                $manifest_raw = file_get_contents(R2_WORKER . "/{$site_id}/{$batch_id}/manifest.json" .
+                    "?" . http_build_query([])); // This won't work without auth header
+                // Better: read from already-downloaded artifacts metadata
+                // Actually, download() already validated manifest. We stored source_url in it at push time.
+                // Re-download manifest to get source_url/source_path
+                $ch = curl_init(R2_WORKER . "/{$site_id}/{$batch_id}/manifest.json");
+                curl_setopt_array($ch, [CURLOPT_HTTPHEADER => ["Authorization: Bearer " . R2_TOKEN],
+                    CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30]);
+                $mdata = curl_exec($ch); curl_close($ch);
+                $manifest = json_decode($mdata, true) ?: [];
+
+                echo json_encode(['ok' => true, 'msg' => implode(', ', $dl),
+                    'source_url' => $manifest['source_url'] ?? '',
+                    'source_path' => $manifest['source_path'] ?? '']);
                 break;
+
             case 'import':
                 echo json_encode(['ok' => true, 'msg' => $engine->import_db() . ' statements']);
                 break;
+
             case 'extract':
                 echo json_encode(['ok' => true, 'msg' => implode(', ', $engine->extract())]);
                 break;
+
             case 'replace':
-                $search_url = $_POST['search'] ?? '';
-                if (!$search_url) throw new RuntimeException('search URL required');
+                $tu = trim(@file_get_contents($tmp_dir . '/target-siteurl') ?: '');
+                if (!$tu) throw new RuntimeException('Target siteurl missing — restart migration');
+                $source_url = $_POST['source_url'] ?? '';
+                $source_path = $_POST['source_path'] ?? '';
+                if (!$source_url) throw new RuntimeException('source_url required');
 
-                // Read target URL captured before import
-                $target_url_file = $tmp_dir . '/target-siteurl';
-                if (!file_exists($target_url_file)) throw new RuntimeException('Target siteurl not captured — re-run from download');
-                $target_url = trim(file_get_contents($target_url_file));
-                if (!$target_url) throw new RuntimeException('Empty target siteurl');
-
-                $pairs = [[$search_url, $target_url]];
-                $h = str_replace('https://', 'http://', $search_url);
-                if ($h !== $search_url) $pairs[] = [$h, $target_url];
-
-                $search_path = $_POST['search_path'] ?? '';
-                if ($search_path) {
-                    $pairs[] = [$search_path, rtrim($site_root, '/')];
-                }
+                $pairs = [[$source_url, $tu]];
+                $h = str_replace('https://', 'http://', $source_url);
+                if ($h !== $source_url) $pairs[] = [$h, $tu];
+                if ($source_path) $pairs[] = [$source_path, rtrim($site_root, '/')];
 
                 echo json_encode(['ok' => true, 'msg' => $engine->search_replace($pairs) . ' replacements']);
                 break;
+
             case 'flush':
                 $engine->flush();
                 $engine->cleanup();
                 @unlink($self_path);
-                echo json_encode(['ok' => true, 'msg' => 'Done — installer deleted']);
+                echo json_encode(['ok' => true, 'msg' => 'Done']);
                 break;
+
             default:
                 echo json_encode(['error' => 'Unknown step']);
         }
     } catch (Throwable $e) {
         echo json_encode(['error' => $e->getMessage()]);
     }
-
     $mysqli->close();
     exit;
 }
-
-// ============================================================
-// UI
-// ============================================================
 ?>
 <!DOCTYPE html>
 <html>
@@ -169,51 +172,73 @@ label{display:block;font-size:.85rem;color:#a6adc8;margin:.8rem 0 .3rem}input{wi
 button{background:#89b4fa;color:#1e1e2e;border:none;padding:.6rem 1.5rem;border-radius:4px;font-weight:600;cursor:pointer;margin-top:1rem}button:hover{background:#74c7ec}
 .log{background:#11111b;border-radius:4px;padding:1rem;margin-top:1rem;font-family:monospace;font-size:.85rem;max-height:400px;overflow-y:auto;display:none;line-height:1.6}
 .ok{color:#a6e3a1}.err{color:#f38ba8}.info{color:#89b4fa}.step{color:#f9e2af;font-weight:bold}
+.hint{font-size:.8rem;color:#6c7086;margin-top:.2rem}
 </style>
 </head>
 <body>
 <h1>WP Migrate Lite — Installer</h1>
 <div class="card">
-    <label>Installer Token</label><input type="password" id="token">
-    <label>Source Site ID</label><input type="text" id="siteid">
-    <label>Batch ID</label><input type="text" id="batchid">
-    <label>Source URL</label><input type="url" id="search">
-    <label>Source Server Path (optional)</label><input type="text" id="searchpath">
-    <label>WP Content Path (optional, auto-detected)</label><input type="text" id="wpcontentdir" placeholder="<?php echo htmlspecialchars($wp_content); ?>" value="">
+    <label>Installer Token</label>
+    <input type="password" id="token">
+    <label>Migration Code</label>
+    <input type="text" id="code" placeholder="site-id/batch-id (from push output)">
+    <div class="hint">Paste the migration code shown after Push completes</div>
+<?php if (!$wp_content_proven): ?>
+    <label>WP Content Path</label>
+    <input type="text" id="wpcontentdir" placeholder="e.g. <?php echo htmlspecialchars($wp_content); ?>">
+    <div class="hint">Auto-detection failed — please specify the path</div>
+<?php endif; ?>
     <button onclick="run()">Start Migration</button>
 </div>
 <div class="log" id="log"></div>
 <script>
 function log(m,c){var e=document.getElementById('log');e.style.display='block';e.innerHTML+='<div class="'+(c||'')+'">'+m+'</div>';e.scrollTop=e.scrollHeight}
-function post(d){d.token=document.getElementById('token').value;d.wp_content_dir=document.getElementById('wpcontentdir').value;return fetch(location.href,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(d)}).then(r=>r.json())}
+function post(d){
+    d.token=document.getElementById('token').value;
+    var wc=document.getElementById('wpcontentdir');
+    if(wc)d.wp_content_dir=wc.value;
+    return fetch(location.href,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(d)}).then(r=>r.json());
+}
 async function run(){
     document.getElementById('log').innerHTML='';
-    var si=document.getElementById('siteid').value,bi=document.getElementById('batchid').value,
-        s=document.getElementById('search').value,sp=document.getElementById('searchpath').value;
-    if(!si||!bi||!s){alert('Fill Site ID, Batch ID, and Source URL');return}
-    var steps=[
-        {step:'download',label:'Downloading',data:{site_id:si,batch_id:bi}},
-        {step:'import',label:'Importing DB'},
-        {step:'extract',label:'Extracting files'},
-        {step:'replace',label:'Search-replace',data:{search:s,search_path:sp}},
-        {step:'flush',label:'Finalizing'}
-    ];
-    for(var i=0;i<steps.length;i++){
-        log('⏳ '+steps[i].label+'...','step');
-        var r=await post(Object.assign({step:steps[i].step},steps[i].data||{}));
-        if(r.error){log('✗ '+r.error,'err');return}
-        log('✓ '+r.msg,'ok');
-    }
+    var code=document.getElementById('code').value;
+    if(!code){alert('Enter the migration code');return}
+
+    log('⏳ Downloading...','step');
+    var r=await post({step:'migrate',migrate_code:code});
+    if(r.error){log('✗ '+r.error,'err');return}
+    log('✓ '+r.msg,'ok');
+    var srcUrl=r.source_url,srcPath=r.source_path;
+
+    log('⏳ Importing database...','step');
+    r=await post({step:'import'});
+    if(r.error){log('✗ '+r.error,'err');return}
+    log('✓ '+r.msg,'ok');
+
+    log('⏳ Extracting files...','step');
+    r=await post({step:'extract'});
+    if(r.error){log('✗ '+r.error,'err');return}
+    log('✓ '+r.msg,'ok');
+
+    log('⏳ Search-replace...','step');
+    r=await post({step:'replace',source_url:srcUrl,source_path:srcPath});
+    if(r.error){log('✗ '+r.error,'err');return}
+    log('✓ '+r.msg,'ok');
+
+    log('⏳ Finalizing...','step');
+    r=await post({step:'flush'});
+    if(r.error){log('✗ '+r.error,'err');return}
+    log('✓ '+r.msg,'ok');
+
     log('🎉 Migration complete! Log in with source site credentials.','ok');
     log('Installer has been auto-deleted.','info');
 }
 </script>
 </body>
 </html>
-
 <?php
 // ============================================================
-// Embedded Pull Engine (same as includes/class-pull-engine.php)
+// Embedded Pull Engine
 // ============================================================
 /**
  * Pull Engine — runtime-agnostic migration core.

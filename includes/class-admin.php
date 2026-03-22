@@ -41,14 +41,10 @@ class ML_Admin {
                 <div id="ml-push-log" class="ml-log" style="display:none"></div>
             </div>
 
-            <div class="ml-card">
+            <div class="ml-card" id="ml-pull-card" style="<?php echo $last_batch ? '' : 'display:none'; ?>">
                 <h2>Pull Command</h2>
-                <p class="description" id="ml-pull-hint"><?php
-                    echo $last_batch
-                        ? 'Copy this command and run it on the target site.'
-                        : 'Push first — the pull command will appear here.';
-                ?></p>
-                <div id="ml-pull-cmd" class="ml-log" style="<?php echo $last_batch ? '' : 'display:none'; ?>"></div>
+                <p class="description" id="ml-pull-hint">Copy and run on the target site:</p>
+                <div id="ml-pull-cmd" class="ml-log"></div>
             </div>
         </div>
 

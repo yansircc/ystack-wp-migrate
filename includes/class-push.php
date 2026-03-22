@@ -75,10 +75,12 @@ class ML_Push {
 
     public function commit_manifest(): string {
         $manifest = json_encode([
-            'batch_id'   => $this->batch_id,
-            'site_id'    => $this->site_id(),
-            'artifacts'  => self::ARTIFACTS,
-            'created_at' => gmdate('Y-m-d\TH:i:s\Z'),
+            'batch_id'    => $this->batch_id,
+            'site_id'     => $this->site_id(),
+            'source_url'  => home_url(),
+            'source_path' => rtrim(ABSPATH, '/'),
+            'artifacts'   => self::ARTIFACTS,
+            'created_at'  => gmdate('Y-m-d\TH:i:s\Z'),
         ]);
         $tmp = tempnam(ML_DB::tmp_dir(), 'mfst');
         try {

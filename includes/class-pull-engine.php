@@ -121,8 +121,11 @@ class ML_Pull_Engine {
                 }
             }
             if (!@rename($staging, $live)) {
-                if (is_dir($backup)) @rename($backup, $live);
-                throw new RuntimeException("{$d}: swap failed");
+                $rolled_back = is_dir($backup) && @rename($backup, $live);
+                throw new RuntimeException($rolled_back
+                    ? "{$d}: swap failed, rolled back"
+                    : "{$d}: CRITICAL — swap and rollback both failed, {$d}/ may be missing. Manual recovery required."
+                );
             }
             if (is_dir($backup)) self::rmdir_r($backup);
             $results[] = "{$d}: {$num} files";

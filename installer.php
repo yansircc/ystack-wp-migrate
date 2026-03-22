@@ -16,8 +16,18 @@ ini_set('memory_limit', '512M');
 $self_path = __FILE__;
 $site_root = dirname($self_path);
 
-// Load shared pull engine
-require_once $site_root . '/wp-content/plugins/wp-migrate-lite/includes/class-pull-engine.php';
+// Load shared pull engine — search in known locations
+$engine_file = null;
+$search_paths = [
+    $site_root . '/wp-content/plugins/wp-migrate-lite/includes/class-pull-engine.php',
+    $wp_content . '/plugins/wp-migrate-lite/includes/class-pull-engine.php',
+    dirname($self_path) . '/includes/class-pull-engine.php',
+];
+foreach ($search_paths as $p) {
+    if (file_exists($p)) { $engine_file = $p; break; }
+}
+if (!$engine_file) die(json_encode(['error' => 'class-pull-engine.php not found. Install the WP Migrate Lite plugin first.']));
+require_once $engine_file;
 
 // Parse wp-config.php
 $wp_config_path = null;
@@ -74,12 +84,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                 echo json_encode(['ok' => true, 'msg' => implode(', ', $engine->extract())]);
                 break;
             case 'replace':
-                $pairs = [[$_POST['search'] ?? '', $_POST['replace'] ?? '']];
-                $h = str_replace('https://', 'http://', $pairs[0][0]);
-                if ($h !== $pairs[0][0]) $pairs[] = [$h, $pairs[0][1]];
-                if (!empty($_POST['search_path']) && !empty($_POST['replace_path'])) {
-                    $pairs[] = [$_POST['search_path'], $_POST['replace_path']];
+                $search_url = $_POST['search'] ?? '';
+                if (!$search_url) throw new RuntimeException('search URL required');
+
+                // Derive target URL from imported DB (siteurl option)
+                $su = $mysqli->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl'");
+                if (!$su || !($row = $su->fetch_assoc())) throw new RuntimeException('Cannot read siteurl from DB');
+                $target_url = $row['option_value'];
+
+                $pairs = [[$search_url, $target_url]];
+                $h = str_replace('https://', 'http://', $search_url);
+                if ($h !== $search_url) $pairs[] = [$h, $target_url];
+
+                // Server path: source from form, target is site_root
+                $search_path = $_POST['search_path'] ?? '';
+                if ($search_path) {
+                    $pairs[] = [$search_path, rtrim($site_root, '/')];
                 }
+
                 echo json_encode(['ok' => true, 'msg' => $engine->search_replace($pairs) . ' replacements']);
                 break;
             case 'flush':
@@ -144,7 +166,7 @@ async function run(){
         {step:'download',label:'Downloading',data:{worker:w,r2_token:t,site_id:si,batch_id:bi}},
         {step:'import',label:'Importing DB'},
         {step:'extract',label:'Extracting files'},
-        {step:'replace',label:'Search-replace',data:{search:s,replace:location.origin,search_path:sp,replace_path:''}},
+        {step:'replace',label:'Search-replace',data:{search:s,search_path:sp}},
         {step:'flush',label:'Finalizing'}
     ];
     for(var i=0;i<steps.length;i++){

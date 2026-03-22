@@ -27,7 +27,7 @@ class ML_Admin {
             'ajaxurl' => admin_url('admin-ajax.php'),
             'nonce'    => wp_create_nonce('migrate_lite'),
             'siteId'   => $site_id,
-            'pullScript' => str_replace(ABSPATH, '', ML_PATH . 'pull-cli.php'),
+            'pullScript' => ML_PATH . 'pull-cli.php',
         ]); ?>;
         </script>
 

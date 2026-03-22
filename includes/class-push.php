@@ -12,7 +12,7 @@ class ML_Push {
 
     public function __construct(ML_R2 $r2, string $batch_id = '') {
         $this->r2 = $r2;
-        $this->batch_id = $batch_id ?: date('Ymd-His');
+        $this->batch_id = $batch_id ?: date('Ymd-His') . '-' . bin2hex(random_bytes(4));
     }
 
     public function batch_id(): string { return $this->batch_id; }

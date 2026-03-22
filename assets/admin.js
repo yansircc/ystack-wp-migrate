@@ -72,17 +72,19 @@ function mlGenPullCmd() {
         return;
     }
 
-    var cmd = 'wp eval-file ' + migrateLite.pullScript + ' -- \\\n'
-        + '  --worker=' + workerUrl + ' \\\n'
-        + '  --token=' + token + ' \\\n'
-        + '  --site-id=' + siteId + ' \\\n'
-        + '  --batch-id=' + batchId + ' \\\n'
-        + '  --search=' + srcUrl + ' \\\n'
-        + '  --replace=$(wp option get siteurl)';
+    function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
+
+    var cmd = 'wp eval-file ' + sq(migrateLite.pullScript) + ' -- \\\n'
+        + '  --worker=' + sq(workerUrl) + ' \\\n'
+        + '  --token=' + sq(token) + ' \\\n'
+        + '  --site-id=' + sq(siteId) + ' \\\n'
+        + '  --batch-id=' + sq(batchId) + ' \\\n'
+        + '  --search=' + sq(srcUrl) + ' \\\n'
+        + '  --replace="$(wp option get siteurl)"';
 
     if (srcPath) {
-        cmd += ' \\\n  --search-path=' + srcPath + ' \\\n'
-            + '  --replace-path=$(wp eval "echo rtrim(ABSPATH, \'/\');")';
+        cmd += ' \\\n  --search-path=' + sq(srcPath)
+            + ' \\\n  --replace-path=/path/to/target/wordpress';
     }
 
     el.style.display = 'block';

@@ -34,13 +34,14 @@ if (preg_match('/\$table_prefix\s*=\s*[\'"]([^\'"]+)/', $config, $m)) $prefix = 
 // Resolve wp-content directory
 $wp_content = $site_root . '/wp-content';
 $wp_content_proven = false;
+$has_wpcontent_define = (bool) preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]/",$config);
 
 // Try literal string from wp-config.php
 if (preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]\s*,\s*['\"]([^'\"]+)['\"]/", $config, $m)) {
     if (is_dir($m[1])) { $wp_content = $m[1]; $wp_content_proven = true; }
 }
-// Default wp-content exists? That's proven too.
-if (!$wp_content_proven && is_dir($wp_content)) {
+// Default wp-content proven ONLY if wp-config doesn't define WP_CONTENT_DIR at all
+if (!$wp_content_proven && !$has_wpcontent_define && is_dir($wp_content)) {
     $wp_content_proven = true;
 }
 // Heuristic probe if nothing proven

@@ -29,9 +29,9 @@ if (!$worker || !$token || !$site_id || !$batch_id || !$search || !$replace) {
     WP_CLI::error('Required: --worker, --token, --site-id, --batch-id, --search, --replace');
 }
 
-// Load plugin classes
-require_once WP_PLUGIN_DIR . '/wp-migrate-lite/includes/class-db.php';
-require_once WP_PLUGIN_DIR . '/wp-migrate-lite/includes/class-r2.php';
+// Load plugin classes (from same directory as this script)
+require_once __DIR__ . '/includes/class-db.php';
+require_once __DIR__ . '/includes/class-r2.php';
 
 global $wpdb;
 $r2 = new ML_R2($worker, $token);
@@ -96,8 +96,16 @@ foreach (['uploads', 'themes', 'plugins'] as $dir) {
     unlink($zip_path);
     if (!$ok) { rmdir_recursive($staging); WP_CLI::error("{$dir}: extract failed"); }
 
-    if (is_dir($live)) rename($live, $backup);
-    rename($staging, $live);
+    if (is_dir($live)) {
+        if (!@rename($live, $backup)) {
+            rmdir_recursive($staging);
+            WP_CLI::error("{$dir}: swap failed, live dir preserved");
+        }
+    }
+    if (!@rename($staging, $live)) {
+        if (is_dir($backup)) @rename($backup, $live);
+        WP_CLI::error("{$dir}: swap failed" . (is_dir($live) ? ', rolled back' : ', CRITICAL — directory missing'));
+    }
     if (is_dir($backup)) rmdir_recursive($backup);
 
     WP_CLI::log("  {$dir}: {$num} files");
@@ -117,22 +125,31 @@ $tables = ML_DB::owned_tables();
 $grand_total = 0;
 
 foreach ($tables as $table) {
+    $col_results = $wpdb->get_results("SHOW COLUMNS FROM `{$table}`");
+    if ($col_results === null || $wpdb->last_error) {
+        WP_CLI::error("{$table}: DB error reading columns — " . $wpdb->last_error);
+    }
     $columns = [];
-    foreach ($wpdb->get_results("SHOW COLUMNS FROM `{$table}`") as $col) {
+    foreach ($col_results as $col) {
         if (preg_match('/(char|text|blob|enum|set)/i', $col->Type)) $columns[] = $col->Field;
     }
     if (empty($columns)) continue;
 
-    $pk_cols = [];
-    foreach ($wpdb->get_results("SHOW KEYS FROM `{$table}` WHERE Key_name = 'PRIMARY'") as $k) {
-        $pk_cols[] = $k->Column_name;
+    $key_results = $wpdb->get_results("SHOW KEYS FROM `{$table}` WHERE Key_name = 'PRIMARY'");
+    if ($key_results === null || $wpdb->last_error) {
+        WP_CLI::error("{$table}: DB error reading keys — " . $wpdb->last_error);
     }
+    $pk_cols = [];
+    foreach ($key_results as $k) $pk_cols[] = $k->Column_name;
     if (empty($pk_cols)) continue;
 
     $total = 0;
     $offset = 0;
     while (true) {
         $rows = $wpdb->get_results("SELECT * FROM `{$table}` LIMIT 1000 OFFSET {$offset}", ARRAY_A);
+        if ($rows === null && $wpdb->last_error) {
+            WP_CLI::error("{$table}: DB read error — " . $wpdb->last_error);
+        }
         if (empty($rows)) break;
 
         foreach ($rows as $row) {
@@ -149,7 +166,8 @@ foreach ($tables as $table) {
             if (!empty($updates)) {
                 $set = []; foreach ($updates as $c => $v) $set[] = "`{$c}` = \"" . ML_DB::esc($v) . "\"";
                 $where = []; foreach ($pk_cols as $pk) $where[] = "`{$pk}` = \"" . ML_DB::esc($row[$pk]) . "\"";
-                mysqli_query($wpdb->dbh, "UPDATE `{$table}` SET " . implode(', ', $set) . " WHERE " . implode(' AND ', $where));
+                $ok = mysqli_query($wpdb->dbh, "UPDATE `{$table}` SET " . implode(', ', $set) . " WHERE " . implode(' AND ', $where));
+                if ($ok === false) WP_CLI::error("{$table}: SQL update error — " . mysqli_error($wpdb->dbh));
                 $total += count($updates);
             }
         }

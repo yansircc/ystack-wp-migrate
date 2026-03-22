@@ -72,7 +72,7 @@ function mlGenPullCmd() {
         return;
     }
 
-    var cmd = 'wp eval-file wp-content/plugins/wp-migrate-lite/pull-cli.php -- \\\n'
+    var cmd = 'wp eval-file ' + migrateLite.pullScript + ' -- \\\n'
         + '  --worker=' + workerUrl + ' \\\n'
         + '  --token=' + token + ' \\\n'
         + '  --site-id=' + siteId + ' \\\n'

@@ -31,7 +31,8 @@ foreach (['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST'] as $c) {
 $prefix = 'wp_';
 if (preg_match('/\$table_prefix\s*=\s*[\'"]([^\'"]+)/', $config, $m)) $prefix = $m[1];
 
-// Resolve wp-content directory
+// Resolve wp-content directory: UI override > wp-config literal > probe
+$wp_content_override = ''; // Set by AJAX from UI if provided
 $wp_content = $site_root . '/wp-content';
 if (preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]\s*,\s*['\"]([^'\"]+)['\"]/", $config, $m)) {
     // Literal string path
@@ -65,24 +66,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
     if ($mysqli->connect_error) die(json_encode(['error' => 'DB: ' . $mysqli->connect_error]));
     $mysqli->set_charset('utf8mb4');
 
+    // Allow UI to override wp-content path for nonstandard installs
+    $wp_content_post = trim($_POST['wp_content_dir'] ?? '');
+    if ($wp_content_post && is_dir($wp_content_post)) $wp_content = $wp_content_post;
+
     $engine = new ML_Pull_Engine($mysqli, $prefix, $wp_content, $tmp_dir);
     $step = $_POST['step'] ?? '';
 
     try {
         switch ($step) {
             case 'download':
-                // Capture target siteurl BEFORE import overwrites it — hard-fail on any error
-                $su = $mysqli->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl'");
-                if (!$su) throw new RuntimeException('Cannot read target siteurl: ' . $mysqli->error);
-                $row = $su->fetch_assoc();
-                if (!$row || empty($row['option_value'])) throw new RuntimeException('Target siteurl is empty or missing');
-                $target_url = $row['option_value'];
-
+                // Capture target siteurl BEFORE import — write-once per session
                 $tu_path = $tmp_dir . '/target-siteurl';
-                $tu_len = strlen($target_url);
-                $tu_written = @file_put_contents($tu_path, $target_url);
-                if ($tu_written === false || $tu_written < $tu_len) {
-                    throw new RuntimeException('Failed to persist target siteurl');
+                if (!file_exists($tu_path)) {
+                    $su = $mysqli->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl'");
+                    if (!$su) throw new RuntimeException('Cannot read target siteurl: ' . $mysqli->error);
+                    $row = $su->fetch_assoc();
+                    if (!$row || empty($row['option_value'])) throw new RuntimeException('Target siteurl is empty or missing');
+                    $tu_len = strlen($row['option_value']);
+                    $tu_written = @file_put_contents($tu_path, $row['option_value']);
+                    if ($tu_written === false || $tu_written < $tu_len) {
+                        throw new RuntimeException('Failed to persist target siteurl');
+                    }
                 }
 
                 $dl = $engine->download($_POST['worker'] ?? '', $_POST['r2_token'] ?? '', $_POST['site_id'] ?? '', $_POST['batch_id'] ?? '');
@@ -161,12 +166,13 @@ button{background:#89b4fa;color:#1e1e2e;border:none;padding:.6rem 1.5rem;border-
     <label>Batch ID</label><input type="text" id="batchid">
     <label>Source URL</label><input type="url" id="search">
     <label>Source Server Path (optional)</label><input type="text" id="searchpath">
+    <label>WP Content Path (optional, auto-detected)</label><input type="text" id="wpcontentdir" placeholder="<?php echo htmlspecialchars($wp_content); ?>" value="">
     <button onclick="run()">Start Migration</button>
 </div>
 <div class="log" id="log"></div>
 <script>
 function log(m,c){var e=document.getElementById('log');e.style.display='block';e.innerHTML+='<div class="'+(c||'')+'">'+m+'</div>';e.scrollTop=e.scrollHeight}
-function post(d){d.token=document.getElementById('token').value;return fetch(location.href,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(d)}).then(r=>r.json())}
+function post(d){d.token=document.getElementById('token').value;d.wp_content_dir=document.getElementById('wpcontentdir').value;return fetch(location.href,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(d)}).then(r=>r.json())}
 async function run(){
     document.getElementById('log').innerHTML='';
     var w=document.getElementById('worker').value,t=document.getElementById('r2token').value,

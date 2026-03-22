@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_ajax) {
     if ($mysqli->connect_error) {
         die(json_encode(['error' => 'DB connection failed: ' . $mysqli->connect_error]));
     }
-    $mysqli->set_charset($db['DB_CHARSET'] ?? 'utf8mb4');
+    $mysqli->set_charset('utf8mb4');
     $prefix = $db['prefix'];
 
     $tmp_dir = $site_root . '/.migrate-installer-tmp';

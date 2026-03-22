@@ -1,6 +1,7 @@
 <?php
 /**
  * R2 Worker HTTP client — PUT/GET/DELETE via CF Worker proxy.
+ * Throws RuntimeException on I/O or cURL failures.
  */
 class ML_R2 {
 
@@ -12,34 +13,55 @@ class ML_R2 {
         $this->auth_token = $auth_token;
     }
 
-    /** Upload a local file to R2. */
     public function put(string $key, string $file_path): int {
+        $fp = @fopen($file_path, 'r');
+        if ($fp === false) throw new RuntimeException("Cannot open file for upload: {$file_path}");
+
         $ch = curl_init("{$this->worker_url}/{$key}");
+        if ($ch === false) { fclose($fp); throw new RuntimeException('curl_init failed'); }
+
         curl_setopt_array($ch, [
             CURLOPT_PUT            => true,
-            CURLOPT_INFILE         => fopen($file_path, 'r'),
+            CURLOPT_INFILE         => $fp,
             CURLOPT_INFILESIZE     => filesize($file_path),
             CURLOPT_HTTPHEADER     => ["Authorization: Bearer {$this->auth_token}"],
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => 600,
         ]);
-        curl_exec($ch);
+        $result = curl_exec($ch);
+        if ($result === false) {
+            $err = curl_error($ch);
+            curl_close($ch);
+            fclose($fp);
+            throw new RuntimeException("cURL upload failed: {$err}");
+        }
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+        fclose($fp);
         return $code;
     }
 
-    /** Download a file from R2. */
     public function get(string $key, string $dest_path): int {
+        $fp = @fopen($dest_path, 'w');
+        if ($fp === false) throw new RuntimeException("Cannot open file for download: {$dest_path}");
+
         $ch = curl_init("{$this->worker_url}/{$key}");
-        $fp = fopen($dest_path, 'w');
+        if ($ch === false) { fclose($fp); throw new RuntimeException('curl_init failed'); }
+
         curl_setopt_array($ch, [
             CURLOPT_FILE           => $fp,
             CURLOPT_HTTPHEADER     => ["Authorization: Bearer {$this->auth_token}"],
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_TIMEOUT        => 600,
         ]);
-        curl_exec($ch);
+        $result = curl_exec($ch);
+        if ($result === false) {
+            $err = curl_error($ch);
+            curl_close($ch);
+            fclose($fp);
+            @unlink($dest_path); // Remove truncated file
+            throw new RuntimeException("cURL download failed: {$err}");
+        }
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         fclose($fp);

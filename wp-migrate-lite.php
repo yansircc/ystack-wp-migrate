@@ -13,7 +13,6 @@ define('ML_URL', plugin_dir_url(__FILE__));
 
 require ML_PATH . 'includes/class-db.php';
 require ML_PATH . 'includes/class-r2.php';
-require ML_PATH . 'includes/class-replace.php';
 require ML_PATH . 'includes/class-push.php';
 require ML_PATH . 'includes/class-pull.php';
 require ML_PATH . 'includes/class-mu-deployer.php';

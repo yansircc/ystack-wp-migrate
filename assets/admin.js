@@ -27,6 +27,13 @@ function mlSaveSettings() {
 async function mlPush() {
     var log = 'ml-push-log';
     document.getElementById(log).innerHTML = '';
+
+    // Init batch
+    var r = await mlAjax('push_step', { step: 'init' });
+    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
+    var batchId = r.data.batch_id;
+    mlLog(log, 'Batch: ' + batchId, 'ml-info');
+
     var steps = [
         { step: 'db',      label: 'Database' },
         { step: 'uploads', label: 'Uploads' },
@@ -36,7 +43,7 @@ async function mlPush() {
 
     for (var i = 0; i < steps.length; i++) {
         mlLog(log, '⏳ Pushing ' + steps[i].label + '...', 'ml-step');
-        var r = await mlAjax('push_step', { step: steps[i].step });
+        r = await mlAjax('push_step', { step: steps[i].step, batch_id: batchId });
         if (r.success) {
             mlLog(log, '✓ ' + r.data, 'ml-ok');
         } else {
@@ -44,22 +51,29 @@ async function mlPush() {
             return;
         }
     }
-    mlLog(log, '🎉 Push complete! Site ID: ' + migrateLite.siteId, 'ml-ok');
+
+    // Commit manifest
+    mlLog(log, '⏳ Committing manifest...', 'ml-step');
+    r = await mlAjax('push_step', { step: 'manifest', batch_id: batchId });
+    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
+    mlLog(log, '✓ ' + r.data, 'ml-ok');
+    mlLog(log, '🎉 Push complete! Site ID: ' + migrateLite.siteId + ', Batch: ' + batchId, 'ml-ok');
 }
 
 async function mlPull() {
     var log = 'ml-pull-log';
     document.getElementById(log).innerHTML = '';
     var siteId     = document.getElementById('ml-pull-site-id').value;
+    var batchId    = document.getElementById('ml-pull-batch-id').value;
     var sourceUrl  = document.getElementById('ml-pull-source-url').value;
     var sourcePath = document.getElementById('ml-pull-source-path').value;
     var pullToken  = '';
 
-    if (!siteId || !sourceUrl) { alert('Site ID and Source URL are required'); return; }
+    if (!siteId || !batchId || !sourceUrl) { alert('Site ID, Batch ID, and Source URL are required'); return; }
 
-    // 1. Download from R2 (creates pull token)
+    // 1. Download from R2 by manifest (creates pull token)
     mlLog(log, '⏳ Downloading from R2...', 'ml-step');
-    var r = await mlAjax('pull_step', { step: 'download', site_id: siteId });
+    var r = await mlAjax('pull_step', { step: 'download', site_id: siteId, batch_id: batchId });
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
     pullToken = r.data.pull_token;
     mlLog(log, '✓ ' + r.data.msg, 'ml-ok');
@@ -70,13 +84,19 @@ async function mlPull() {
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
     mlLog(log, '✓ ' + r.data, 'ml-ok');
 
-    // 3. Extract files (handled by mu-plugin)
+    // 3. Post-import prepare: restore operator + park plugins (mu-plugin)
+    mlLog(log, '⏳ Preparing environment...', 'ml-step');
+    r = await mlAjax('pull_step', { step: 'prepare', site_id: siteId, pull_token: pullToken });
+    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
+    mlLog(log, '✓ ' + r.data, 'ml-ok');
+
+    // 4. Extract files (mu-plugin)
     mlLog(log, '⏳ Extracting files...', 'ml-step');
     r = await mlAjax('pull_step', { step: 'extract', site_id: siteId, pull_token: pullToken });
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
     mlLog(log, '✓ ' + r.data, 'ml-ok');
 
-    // 4. Search-replace per table (handled by mu-plugin)
+    // 5. Search-replace per table (mu-plugin)
     mlLog(log, '⏳ Starting search-replace...', 'ml-step');
     r = await mlAjax('pull_step', { step: 'get_tables', site_id: siteId, source_url: sourceUrl, pull_token: pullToken });
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
@@ -93,7 +113,8 @@ async function mlPull() {
             site_id: siteId,
             pull_token: pullToken
         });
-        if (r.success && r.data.indexOf(': 0 ') === -1) {
+        if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
+        if (r.data.indexOf(': 0 ') === -1) {
             mlLog(log, '  [' + pct + '%] ' + r.data, 'ml-ok');
         }
     }
@@ -101,6 +122,7 @@ async function mlPull() {
     // 5. Flush (handled by mu-plugin, which self-deletes)
     mlLog(log, '⏳ Flushing caches...', 'ml-step');
     r = await mlAjax('pull_step', { step: 'flush', site_id: siteId, pull_token: pullToken });
+    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
     mlLog(log, '✓ ' + r.data, 'ml-ok');
 
     mlLog(log, '🎉 Pull complete! Site migrated.', 'ml-ok');

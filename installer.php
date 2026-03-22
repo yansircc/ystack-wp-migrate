@@ -16,20 +16,7 @@ ini_set('memory_limit', '512M');
 $self_path = __FILE__;
 $site_root = dirname($self_path);
 
-// Load shared pull engine — search in known locations
-$engine_file = null;
-$search_paths = [
-    $site_root . '/wp-content/plugins/wp-migrate-lite/includes/class-pull-engine.php',
-    $wp_content . '/plugins/wp-migrate-lite/includes/class-pull-engine.php',
-    dirname($self_path) . '/includes/class-pull-engine.php',
-];
-foreach ($search_paths as $p) {
-    if (file_exists($p)) { $engine_file = $p; break; }
-}
-if (!$engine_file) die(json_encode(['error' => 'class-pull-engine.php not found. Install the WP Migrate Lite plugin first.']));
-require_once $engine_file;
-
-// Parse wp-config.php
+// Parse wp-config.php first (needed for DB creds and wp-content path)
 $wp_config_path = null;
 if (file_exists($site_root . '/wp-config.php')) $wp_config_path = $site_root . '/wp-config.php';
 elseif (file_exists(dirname($site_root) . '/wp-config.php')) $wp_config_path = dirname($site_root) . '/wp-config.php';
@@ -49,6 +36,19 @@ if (preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]\s*,\s*(.+?)\s*\)/", $con
     $expr = trim($m[1], "'\"\t\n\r ");
     if (is_dir($expr)) $wp_content = $expr;
 }
+
+// Load shared pull engine — search using resolved wp-content path
+$engine_file = null;
+$search_paths = [
+    $wp_content . '/plugins/wp-migrate-lite/includes/class-pull-engine.php',
+    $site_root . '/wp-content/plugins/wp-migrate-lite/includes/class-pull-engine.php',
+    dirname($self_path) . '/includes/class-pull-engine.php',
+];
+foreach ($search_paths as $p) {
+    if (file_exists($p)) { $engine_file = $p; break; }
+}
+if (!$engine_file) die(json_encode(['error' => 'class-pull-engine.php not found. Install the WP Migrate Lite plugin first.']));
+require_once $engine_file;
 
 // Storage: install-scoped temp dir (outside webroot when possible)
 $install_hash = substr(md5(realpath($site_root) ?: $site_root), 0, 12);
@@ -74,6 +74,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
     try {
         switch ($step) {
             case 'download':
+                // Capture target siteurl BEFORE import overwrites it
+                $su = $mysqli->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl'");
+                $target_url = ($su && ($r = $su->fetch_assoc())) ? $r['option_value'] : '';
+                if ($target_url) {
+                    file_put_contents($tmp_dir . '/target-siteurl', $target_url);
+                }
+
                 $dl = $engine->download($_POST['worker'] ?? '', $_POST['r2_token'] ?? '', $_POST['site_id'] ?? '', $_POST['batch_id'] ?? '');
                 echo json_encode(['ok' => true, 'msg' => implode(', ', $dl)]);
                 break;
@@ -87,16 +94,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                 $search_url = $_POST['search'] ?? '';
                 if (!$search_url) throw new RuntimeException('search URL required');
 
-                // Derive target URL from imported DB (siteurl option)
-                $su = $mysqli->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl'");
-                if (!$su || !($row = $su->fetch_assoc())) throw new RuntimeException('Cannot read siteurl from DB');
-                $target_url = $row['option_value'];
+                // Read target URL captured before import
+                $target_url_file = $tmp_dir . '/target-siteurl';
+                if (!file_exists($target_url_file)) throw new RuntimeException('Target siteurl not captured — re-run from download');
+                $target_url = trim(file_get_contents($target_url_file));
+                if (!$target_url) throw new RuntimeException('Empty target siteurl');
 
                 $pairs = [[$search_url, $target_url]];
                 $h = str_replace('https://', 'http://', $search_url);
                 if ($h !== $search_url) $pairs[] = [$h, $target_url];
 
-                // Server path: source from form, target is site_root
                 $search_path = $_POST['search_path'] ?? '';
                 if ($search_path) {
                     $pairs[] = [$search_path, rtrim($site_root, '/')];

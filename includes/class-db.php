@@ -113,7 +113,7 @@ class ML_DB {
             }
         }
         // Distinguish EOF from read error
-        if (ferror($fp)) {
+        if (!feof($fp)) {
             fclose($fp);
             return "Read error during import at statement {$count}";
         }

@@ -1,0 +1,7 @@
+.ml-card { background: #fff; border: 1px solid #ccd0d4; padding: 16px 24px; margin: 16px 0; box-shadow: 0 1px 1px rgba(0,0,0,.04); }
+.ml-card h2 { margin-top: 0; padding-top: 0; }
+.ml-log { background: #1e1e1e; color: #d4d4d4; font-family: monospace; font-size: 13px; padding: 16px; margin-top: 12px; max-height: 400px; overflow-y: auto; border-radius: 4px; line-height: 1.6; }
+.ml-log .ml-ok   { color: #4ec9b0; }
+.ml-log .ml-err  { color: #f44747; }
+.ml-log .ml-info { color: #9cdcfe; }
+.ml-log .ml-step { color: #dcdcaa; font-weight: bold; }

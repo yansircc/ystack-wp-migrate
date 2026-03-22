@@ -84,7 +84,7 @@ function mlGenPullCmd() {
 
     if (srcPath) {
         cmd += ' \\\n  --search-path=' + sq(srcPath)
-            + ' \\\n  --replace-path=/path/to/target/wordpress';
+            + ' \\\n  --replace-path="$(wp eval \'echo rtrim(ABSPATH, \"/\");\')"';
     }
 
     el.style.display = 'block';

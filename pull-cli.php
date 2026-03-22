@@ -50,7 +50,10 @@ if ($code !== 200) WP_CLI::error("Manifest not found (HTTP {$code})");
 $manifest = json_decode(file_get_contents($manifest_path), true);
 unlink($manifest_path);
 if (!$manifest || ($manifest['batch_id'] ?? '') !== $batch_id) {
-    WP_CLI::error('Invalid or mismatched manifest');
+    WP_CLI::error('Invalid or mismatched manifest batch_id');
+}
+if (($manifest['site_id'] ?? '') !== $site_id) {
+    WP_CLI::error('Manifest site_id mismatch: expected ' . $site_id . ', got ' . ($manifest['site_id'] ?? '(none)'));
 }
 
 foreach ($manifest['artifacts'] as $f) {

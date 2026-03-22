@@ -84,13 +84,18 @@ class ML_Admin {
 
         try {
             $step = sanitize_text_field($_POST['step'] ?? '');
+
+            if ($step === 'init') {
+                $push = new ML_Push($this->r2());
+                wp_send_json_success(['batch_id' => $push->batch_id()]);
+                return;
+            }
+
             $batch_id = sanitize_text_field($_POST['batch_id'] ?? '');
+            if (!$batch_id) wp_send_json_error('batch_id required');
             $push = new ML_Push($this->r2(), $batch_id);
 
             switch ($step) {
-                case 'init':
-                    wp_send_json_success(['batch_id' => $push->batch_id()]);
-                    break;
                 case 'db':
                     wp_send_json_success($push->db());
                     break;

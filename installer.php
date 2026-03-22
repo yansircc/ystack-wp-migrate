@@ -66,9 +66,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
     if ($mysqli->connect_error) die(json_encode(['error' => 'DB: ' . $mysqli->connect_error]));
     $mysqli->set_charset('utf8mb4');
 
-    // Allow UI to override wp-content path for nonstandard installs
+    // UI override for wp-content path: authoritative if provided, must be valid
     $wp_content_post = trim($_POST['wp_content_dir'] ?? '');
-    if ($wp_content_post && is_dir($wp_content_post)) $wp_content = $wp_content_post;
+    if ($wp_content_post !== '') {
+        if (!is_dir($wp_content_post)) {
+            die(json_encode(['error' => "WP Content Path does not exist: {$wp_content_post}"]));
+        }
+        $wp_content = $wp_content_post;
+    }
 
     $engine = new ML_Pull_Engine($mysqli, $prefix, $wp_content, $tmp_dir);
     $step = $_POST['step'] ?? '';

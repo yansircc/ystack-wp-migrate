@@ -190,23 +190,19 @@ class ML_DB {
             }
             $dir = $parent_real . '/.migrate-lite';
 
-            // In CLI context, docroot check is not applicable — files
-            // are not web-accessible regardless of location.
-            // In web context, prove candidate is outside document root.
-            $is_cli = (defined('WP_CLI') && WP_CLI) || php_sapi_name() === 'cli';
-            if (!$is_cli) {
-                $docroot = self::detect_docroot();
-                if ($docroot === null) {
-                    throw new RuntimeException(
-                        "Cannot detect document root — define MIGRATE_LITE_STORAGE_DIR in wp-config.php"
-                    );
-                }
+            // Prove candidate is outside document root.
+            // Works in both web and CLI — docroot detection is attempted either way.
+            $docroot = self::detect_docroot();
+            if ($docroot !== null) {
                 if (strpos($dir . '/', rtrim($docroot, '/') . '/') === 0) {
                     throw new RuntimeException(
                         "Default storage path ({$dir}) is inside document root ({$docroot}). "
                         . "Define MIGRATE_LITE_STORAGE_DIR in wp-config.php to set a path outside the webroot."
                     );
                 }
+            } else {
+                // Cannot determine docroot — use system temp dir as safe fallback
+                $dir = sys_get_temp_dir() . '/.migrate-lite';
             }
         }
 

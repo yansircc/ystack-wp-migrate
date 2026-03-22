@@ -31,15 +31,20 @@ foreach (['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST'] as $c) {
 $prefix = 'wp_';
 if (preg_match('/\$table_prefix\s*=\s*[\'"]([^\'"]+)/', $config, $m)) $prefix = $m[1];
 
-// Resolve wp-content directory: UI override > wp-config literal > probe
-$wp_content_override = ''; // Set by AJAX from UI if provided
+// Resolve wp-content directory
 $wp_content = $site_root . '/wp-content';
+$wp_content_proven = false;
+
+// Try literal string from wp-config.php
 if (preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]\s*,\s*['\"]([^'\"]+)['\"]/", $config, $m)) {
-    // Literal string path
-    if (is_dir($m[1])) $wp_content = $m[1];
+    if (is_dir($m[1])) { $wp_content = $m[1]; $wp_content_proven = true; }
 }
-// Fallback: probe common alternatives if default doesn't exist
-if (!is_dir($wp_content)) {
+// Default wp-content exists? That's proven too.
+if (!$wp_content_proven && is_dir($wp_content)) {
+    $wp_content_proven = true;
+}
+// Heuristic probe if nothing proven
+if (!$wp_content_proven) {
     foreach (['content', 'app'] as $alt) {
         if (is_dir($site_root . '/' . $alt)) { $wp_content = $site_root . '/' . $alt; break; }
     }
@@ -73,6 +78,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
             die(json_encode(['error' => "WP Content Path does not exist: {$wp_content_post}"]));
         }
         $wp_content = $wp_content_post;
+    } elseif (!$wp_content_proven) {
+        die(json_encode(['error' => "Cannot auto-detect wp-content directory. Please specify WP Content Path in the form."]));
     }
 
     $engine = new ML_Pull_Engine($mysqli, $prefix, $wp_content, $tmp_dir);

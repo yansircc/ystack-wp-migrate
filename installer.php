@@ -33,8 +33,21 @@ if (preg_match('/\$table_prefix\s*=\s*[\'"]([^\'"]+)/', $config, $m)) $prefix = 
 
 $wp_content = $site_root . '/wp-content';
 if (preg_match("/define\s*\(\s*['\"]WP_CONTENT_DIR['\"]\s*,\s*(.+?)\s*\)/", $config, $m)) {
-    $expr = trim($m[1], "'\"\t\n\r ");
-    if (is_dir($expr)) $wp_content = $expr;
+    $expr = trim($m[1]);
+    // Try literal string
+    $literal = trim($expr, "'\"\t\n\r ");
+    if (is_dir($literal)) {
+        $wp_content = $literal;
+    } else {
+        // Try resolving ABSPATH-based expressions: ABSPATH . 'subdir'
+        $resolved = preg_replace_callback(
+            "/ABSPATH\s*\.\s*['\"]([^'\"]+)['\"]/",
+            function ($m) use ($site_root) { return "'" . rtrim($site_root, '/') . '/' . ltrim($m[1], '/') . "'"; },
+            $expr
+        );
+        $resolved = trim($resolved, "'\"\t\n\r ");
+        if (is_dir($resolved)) $wp_content = $resolved;
+    }
 }
 
 // Load shared pull engine — search using resolved wp-content path
@@ -74,11 +87,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
     try {
         switch ($step) {
             case 'download':
-                // Capture target siteurl BEFORE import overwrites it
+                // Capture target siteurl BEFORE import overwrites it — hard-fail on any error
                 $su = $mysqli->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl'");
-                $target_url = ($su && ($r = $su->fetch_assoc())) ? $r['option_value'] : '';
-                if ($target_url) {
-                    file_put_contents($tmp_dir . '/target-siteurl', $target_url);
+                if (!$su) throw new RuntimeException('Cannot read target siteurl: ' . $mysqli->error);
+                $row = $su->fetch_assoc();
+                if (!$row || empty($row['option_value'])) throw new RuntimeException('Target siteurl is empty or missing');
+                $target_url = $row['option_value'];
+
+                $tu_path = $tmp_dir . '/target-siteurl';
+                $tu_len = strlen($target_url);
+                $tu_written = @file_put_contents($tu_path, $target_url);
+                if ($tu_written === false || $tu_written < $tu_len) {
+                    throw new RuntimeException('Failed to persist target siteurl');
                 }
 
                 $dl = $engine->download($_POST['worker'] ?? '', $_POST['r2_token'] ?? '', $_POST['site_id'] ?? '', $_POST['batch_id'] ?? '');

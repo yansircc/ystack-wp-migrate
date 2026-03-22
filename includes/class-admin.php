@@ -1,7 +1,6 @@
 <?php
 /**
- * Admin page: Push GUI + Pull command generator.
- * R2 credentials are built into ML_R2 — no user configuration needed.
+ * Admin page: Push GUI + auto-generated Pull command.
  */
 class ML_Admin {
 
@@ -15,7 +14,8 @@ class ML_Admin {
     }
 
     public function render(): void {
-        $site_id = sanitize_title(parse_url(home_url(), PHP_URL_HOST));
+        $site_id    = sanitize_title(parse_url(home_url(), PHP_URL_HOST));
+        $last_batch = get_option('migrate_lite_last_batch', '');
 
         ?>
         <style><?php readfile(ML_PATH . 'assets/admin.css'); ?></style>
@@ -24,10 +24,10 @@ class ML_Admin {
             'ajaxurl'    => admin_url('admin-ajax.php'),
             'nonce'      => wp_create_nonce('migrate_lite'),
             'siteId'     => $site_id,
-            'pullScript' => ML_PATH . 'pull-cli.php',
+            'siteUrl'    => home_url(),
             'abspath'    => rtrim(ABSPATH, '/'),
-            'workerUrl'  => ML_R2::default_worker(),
-            'authToken'  => ML_R2::default_token(),
+            'pullScript' => ML_PATH . 'pull-cli.php',
+            'lastBatch'  => $last_batch,
         ]); ?>;
         </script>
 
@@ -35,23 +35,20 @@ class ML_Admin {
             <h1>Migrate Lite</h1>
 
             <div class="ml-card">
-                <h2>Push to R2</h2>
-                <p class="description">Export this site's database and files to R2.</p>
+                <h2>Push</h2>
+                <p class="description">Export this site to R2 for another site to pull.</p>
                 <p><button class="button-primary" onclick="mlPush()">Push Full Site</button></p>
                 <div id="ml-push-log" class="ml-log" style="display:none"></div>
             </div>
 
             <div class="ml-card">
-                <h2>Pull from R2</h2>
-                <p class="description">Run the generated command on the target site.</p>
-                <table class="form-table">
-                    <tr><th>Source Site ID</th><td><input type="text" id="ml-pull-site-id" class="regular-text" placeholder="e.g. <?php echo $site_id; ?>" /></td></tr>
-                    <tr><th>Batch ID</th><td><input type="text" id="ml-pull-batch-id" class="regular-text" placeholder="from push output" /></td></tr>
-                    <tr><th>Source URL</th><td><input type="url" id="ml-pull-source-url" class="regular-text" placeholder="https://source-site.com" /></td></tr>
-                    <tr><th>Source Server Path</th><td><input type="text" id="ml-pull-source-path" class="regular-text" placeholder="/home/user/public_html (optional)" /></td></tr>
-                </table>
-                <p><button class="button" onclick="mlGenPullCmd()">Generate Pull Command</button></p>
-                <div id="ml-pull-cmd" class="ml-log" style="display:none"></div>
+                <h2>Pull Command</h2>
+                <p class="description" id="ml-pull-hint"><?php
+                    echo $last_batch
+                        ? 'Copy this command and run it on the target site.'
+                        : 'Push first — the pull command will appear here.';
+                ?></p>
+                <div id="ml-pull-cmd" class="ml-log" style="<?php echo $last_batch ? '' : 'display:none'; ?>"></div>
             </div>
         </div>
 
@@ -70,7 +67,9 @@ class ML_Admin {
 
             if ($step === 'init') {
                 $push = new ML_Push(new ML_R2());
-                wp_send_json_success(['batch_id' => $push->batch_id()]);
+                $batch_id = $push->batch_id();
+                update_option('migrate_lite_last_batch', $batch_id);
+                wp_send_json_success(['batch_id' => $batch_id]);
                 return;
             }
 
@@ -79,19 +78,12 @@ class ML_Admin {
             $push = new ML_Push(new ML_R2(), $batch_id);
 
             switch ($step) {
-                case 'db':
-                    wp_send_json_success($push->db());
-                    break;
+                case 'db':       wp_send_json_success($push->db()); break;
                 case 'uploads':
                 case 'themes':
-                case 'plugins':
-                    wp_send_json_success($push->dir($step));
-                    break;
-                case 'manifest':
-                    wp_send_json_success($push->commit_manifest());
-                    break;
-                default:
-                    wp_send_json_error('Unknown step');
+                case 'plugins':  wp_send_json_success($push->dir($step)); break;
+                case 'manifest': wp_send_json_success($push->commit_manifest()); break;
+                default:         wp_send_json_error('Unknown step');
             }
         } catch (\Throwable $e) {
             wp_send_json_error($e->getMessage());

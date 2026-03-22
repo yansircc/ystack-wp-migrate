@@ -44,49 +44,30 @@ async function mlPush() {
     r = await mlAjax('push_step', { step: 'manifest', batch_id: batchId });
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
     mlLog(log, '✓ ' + r.data, 'ml-ok');
-    mlLog(log, '🎉 Push complete! Site: ' + migrateLite.siteId + ' / Batch: ' + batchId, 'ml-ok');
+    mlLog(log, '🎉 Push complete!', 'ml-ok');
 
-    // Auto-fill pull fields from push context
-    var fields = {
-        'ml-pull-site-id': migrateLite.siteId,
-        'ml-pull-batch-id': batchId,
-        'ml-pull-source-url': location.origin,
-        'ml-pull-source-path': migrateLite.abspath
-    };
-    for (var id in fields) {
-        var el = document.getElementById(id);
-        if (el) el.value = fields[id];
-    }
-    mlGenPullCmd();
+    mlShowPullCmd(batchId);
 }
 
-function mlGenPullCmd() {
+function mlShowPullCmd(batchId) {
     var el = document.getElementById('ml-pull-cmd');
-    var siteId = document.getElementById('ml-pull-site-id').value;
-    var batchId = document.getElementById('ml-pull-batch-id').value;
-    var srcUrl = document.getElementById('ml-pull-source-url').value;
-    var srcPath = document.getElementById('ml-pull-source-path').value;
-
-    if (!siteId || !batchId || !srcUrl) {
-        alert('Site ID, Batch ID, and Source URL are required');
-        return;
-    }
-
+    var hint = document.getElementById('ml-pull-hint');
     function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
-    var wpPath = ' --path=' + sq(migrateLite.abspath);
 
-    var cmd = 'wp' + wpPath + ' eval-file ' + sq(migrateLite.pullScript) + ' -- \\\n'
-        + '  --site-id=' + sq(siteId) + ' \\\n'
+    var cmd = 'wp eval-file ' + sq(migrateLite.pullScript) + ' -- \\\n'
+        + '  --site-id=' + sq(migrateLite.siteId) + ' \\\n'
         + '  --batch-id=' + sq(batchId) + ' \\\n'
-        + '  --search=' + sq(srcUrl) + ' \\\n'
-        + '  --replace="$(wp' + wpPath + ' option get siteurl)"';
+        + '  --search=' + sq(migrateLite.siteUrl) + ' \\\n'
+        + '  --replace="$(wp option get siteurl)" \\\n'
+        + '  --search-path=' + sq(migrateLite.abspath) + ' \\\n'
+        + '  --replace-path="$(wp eval \'echo rtrim(ABSPATH, \"/\");\')"';
 
-    if (srcPath) {
-        cmd += ' \\\n  --search-path=' + sq(srcPath)
-            + ' \\\n  --replace-path=' + sq(migrateLite.abspath);
-    }
-
+    if (hint) hint.textContent = 'Copy and run on the target site:';
     el.style.display = 'block';
-    el.innerHTML = '<div class="ml-info">Run on the target site:</div>'
-        + '<pre style="white-space:pre-wrap;word-break:break-all;user-select:all">' + cmd + '</pre>';
+    el.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-all;user-select:all;margin:0">' + cmd + '</pre>';
+}
+
+// Show pull command on page load if last batch exists
+if (migrateLite.lastBatch) {
+    mlShowPullCmd(migrateLite.lastBatch);
 }

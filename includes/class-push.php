@@ -74,20 +74,25 @@ class ML_Push {
     }
 
     public function commit_manifest(): string {
+        $installer_token = bin2hex(random_bytes(16));
         $manifest = json_encode([
-            'batch_id'    => $this->batch_id,
-            'site_id'     => $this->site_id(),
-            'source_url'  => home_url(),
-            'source_path' => rtrim(ABSPATH, '/'),
-            'artifacts'   => self::ARTIFACTS,
-            'created_at'  => gmdate('Y-m-d\TH:i:s\Z'),
+            'batch_id'        => $this->batch_id,
+            'site_id'         => $this->site_id(),
+            'source_url'      => home_url(),
+            'source_path'     => rtrim(ABSPATH, '/'),
+            'installer_token' => $installer_token,
+            'artifacts'       => self::ARTIFACTS,
+            'created_at'      => gmdate('Y-m-d\TH:i:s\Z'),
         ]);
         $tmp = tempnam(ML_DB::tmp_dir(), 'mfst');
         try {
             ML_DB::write_file($tmp, $manifest);
             $code = $this->r2->put($this->key('manifest.json'), $tmp);
             if ($code !== 200) throw new RuntimeException("Manifest upload failed (HTTP {$code})");
-            return 'Batch ' . $this->batch_id;
+            return json_encode([
+                'batch'          => $this->batch_id,
+                'migrate_code'   => $this->site_id() . '/' . $this->batch_id . '/' . $installer_token,
+            ]);
         } finally {
             @unlink($tmp);
         }

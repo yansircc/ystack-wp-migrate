@@ -15,7 +15,7 @@ class ML_Admin {
 
     public function render(): void {
         $site_id    = sanitize_title(parse_url(home_url(), PHP_URL_HOST));
-        $last_batch = get_option('migrate_lite_last_batch', '');
+        $last_code  = get_option('migrate_lite_last_code', '');
 
         ?>
         <style><?php readfile(ML_PATH . 'assets/admin.css'); ?></style>
@@ -27,7 +27,7 @@ class ML_Admin {
             'siteUrl'    => home_url(),
             'abspath'    => rtrim(ABSPATH, '/'),
             'pullScript' => ML_PATH . 'pull-cli.php',
-            'lastBatch'  => $last_batch,
+            'lastCode'   => $last_code,
         ]); ?>;
         </script>
 
@@ -41,7 +41,7 @@ class ML_Admin {
                 <div id="ml-push-log" class="ml-log" style="display:none"></div>
             </div>
 
-            <div class="ml-card" id="ml-pull-card" style="<?php echo $last_batch ? '' : 'display:none'; ?>">
+            <div class="ml-card" id="ml-pull-card" style="<?php echo $last_code ? '' : 'display:none'; ?>">
                 <h2>Pull Command</h2>
                 <p class="description" id="ml-pull-hint">Copy and run on the target site:</p>
                 <div id="ml-pull-cmd" class="ml-log"></div>
@@ -78,7 +78,14 @@ class ML_Admin {
                 case 'uploads':
                 case 'themes':
                 case 'plugins':  wp_send_json_success($push->dir($step)); break;
-                case 'manifest': wp_send_json_success($push->commit_manifest()); break;
+                case 'manifest':
+                    $result = $push->commit_manifest();
+                    $parsed = json_decode($result, true);
+                    if ($parsed && isset($parsed['migrate_code'])) {
+                        update_option('migrate_lite_last_code', $parsed['migrate_code']);
+                    }
+                    wp_send_json_success($result);
+                    break;
                 default:         wp_send_json_error('Unknown step');
             }
         } catch (\Throwable $e) {

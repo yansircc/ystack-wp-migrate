@@ -6,7 +6,6 @@
  * Only requires: Installer Token + Migration Code (from push output).
  */
 
-define('INSTALLER_TOKEN', ''); // Set before uploading
 define('R2_WORKER', 'https://wp-migrate-proxy.yansir.workers.dev');
 define('R2_TOKEN', '0e7ddc9b3956aafba3b24a1c39d7775edbcb6887f20bc873594ce376b8e219dc');
 
@@ -52,8 +51,27 @@ $tmp_dir = sys_get_temp_dir() . '/.migrate-installer-' . $install_hash;
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
     header('Content-Type: application/json');
 
-    if (INSTALLER_TOKEN === '' || ($_POST['token'] ?? '') !== INSTALLER_TOKEN) {
-        die(json_encode(['error' => 'Invalid or unconfigured token']));
+    // Parse migration code: site_id/batch_id/installer_token
+    $migrate_code = trim($_POST['migrate_code'] ?? '');
+    $code_parts = explode('/', $migrate_code, 3);
+    if (count($code_parts) !== 3 || !$code_parts[0] || !$code_parts[1] || !$code_parts[2]) {
+        die(json_encode(['error' => 'Invalid migration code']));
+    }
+    $mc_site_id = $code_parts[0];
+    $mc_batch_id = $code_parts[1];
+    $mc_token = $code_parts[2];
+
+    // Verify token against manifest on first step (download)
+    // For subsequent steps, token is verified via cached value
+    $token_file = $tmp_dir . '/installer-token';
+    $step = $_POST['step'] ?? '';
+    if ($step === 'migrate') {
+        // First step: download manifest and verify token
+    } else {
+        // Subsequent steps: verify against cached token
+        if (!file_exists($token_file) || trim(@file_get_contents($token_file)) !== $mc_token) {
+            die(json_encode(['error' => 'Invalid token — restart migration']));
+        }
     }
 
     // wp-content override
@@ -71,21 +89,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
 
     if (!is_dir($tmp_dir)) @mkdir($tmp_dir, 0755, true);
     $engine = new ML_Pull_Engine($mysqli, $prefix, $wp_content, $tmp_dir);
-    $step = $_POST['step'] ?? '';
 
     try {
         switch ($step) {
             case 'migrate':
-                // Parse migration code: site_id/batch_id
-                $code = trim($_POST['migrate_code'] ?? '');
-                $parts = explode('/', $code, 2);
-                if (count($parts) !== 2 || !$parts[0] || !$parts[1]) {
-                    throw new RuntimeException('Invalid migration code');
-                }
-                $site_id = $parts[0];
-                $batch_id = $parts[1];
-
-                // Step 1: Capture target siteurl (write-once)
+                // Capture target siteurl (write-once)
                 $tu_path = $tmp_dir . '/target-siteurl';
                 if (!file_exists($tu_path)) {
                     $su = $mysqli->query("SELECT option_value FROM `{$prefix}options` WHERE option_name = 'siteurl'");
@@ -97,22 +105,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                     if ($written === false || $written < $len) throw new RuntimeException('Failed to save target siteurl');
                 }
 
-                // Step 2: Download
-                $dl = $engine->download(R2_WORKER, R2_TOKEN, $site_id, $batch_id);
+                // Download artifacts
+                $dl = $engine->download(R2_WORKER, R2_TOKEN, $mc_site_id, $mc_batch_id);
 
-                // Read source info from manifest
-                $manifest = json_decode(@file_get_contents($tmp_dir . '/manifest-cache.json') ?: '{}', true);
-                // Engine doesn't cache manifest, re-fetch it
-                $manifest_raw = file_get_contents(R2_WORKER . "/{$site_id}/{$batch_id}/manifest.json" .
-                    "?" . http_build_query([])); // This won't work without auth header
-                // Better: read from already-downloaded artifacts metadata
-                // Actually, download() already validated manifest. We stored source_url in it at push time.
-                // Re-download manifest to get source_url/source_path
-                $ch = curl_init(R2_WORKER . "/{$site_id}/{$batch_id}/manifest.json");
+                // Re-fetch manifest to verify token and get source info
+                $ch = curl_init(R2_WORKER . "/{$mc_site_id}/{$mc_batch_id}/manifest.json");
                 curl_setopt_array($ch, [CURLOPT_HTTPHEADER => ["Authorization: Bearer " . R2_TOKEN],
                     CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30]);
                 $mdata = curl_exec($ch); curl_close($ch);
                 $manifest = json_decode($mdata, true) ?: [];
+
+                // Verify installer token from manifest
+                if (($manifest['installer_token'] ?? '') !== $mc_token) {
+                    throw new RuntimeException('Invalid migration code — token mismatch');
+                }
+
+                // Cache token for subsequent steps
+                @file_put_contents($token_file, $mc_token);
 
                 echo json_encode(['ok' => true, 'msg' => implode(', ', $dl),
                     'source_url' => $manifest['source_url'] ?? '',
@@ -178,15 +187,13 @@ button{background:#89b4fa;color:#1e1e2e;border:none;padding:.6rem 1.5rem;border-
 <body>
 <h1>WP Migrate Lite — Installer</h1>
 <div class="card">
-    <label>Installer Token</label>
-    <input type="password" id="token">
     <label>Migration Code</label>
-    <input type="text" id="code" placeholder="site-id/batch-id (from push output)">
-    <div class="hint">Paste the migration code shown after Push completes</div>
+    <input type="text" id="code" placeholder="Paste the code from Push output">
+    <div class="hint">One code contains everything needed to migrate</div>
 <?php if (!$wp_content_proven): ?>
     <label>WP Content Path</label>
     <input type="text" id="wpcontentdir" placeholder="e.g. <?php echo htmlspecialchars($wp_content); ?>">
-    <div class="hint">Auto-detection failed — please specify the path</div>
+    <div class="hint">Auto-detection failed — please specify</div>
 <?php endif; ?>
     <button onclick="run()">Start Migration</button>
 </div>
@@ -194,7 +201,7 @@ button{background:#89b4fa;color:#1e1e2e;border:none;padding:.6rem 1.5rem;border-
 <script>
 function log(m,c){var e=document.getElementById('log');e.style.display='block';e.innerHTML+='<div class="'+(c||'')+'">'+m+'</div>';e.scrollTop=e.scrollHeight}
 function post(d){
-    d.token=document.getElementById('token').value;
+    d.migrate_code=document.getElementById('code').value;
     var wc=document.getElementById('wpcontentdir');
     if(wc)d.wp_content_dir=wc.value;
     return fetch(location.href,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(d)}).then(r=>r.json());

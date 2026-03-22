@@ -43,23 +43,24 @@ async function mlPush() {
     mlLog(log, '⏳ Manifest...', 'ml-step');
     r = await mlAjax('push_step', { step: 'manifest', batch_id: batchId });
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
-    mlLog(log, '✓ ' + r.data, 'ml-ok');
 
-    var migrateCode = migrateLite.siteId + '/' + batchId;
+    var manifestResult = JSON.parse(r.data);
+    var migrateCode = manifestResult.migrate_code;
+
+    mlLog(log, '✓ Manifest committed', 'ml-ok');
     mlLog(log, '🎉 Push complete!', 'ml-ok');
     mlLog(log, 'Migration code: ' + migrateCode, 'ml-info');
 
-    mlShowPullCmd(batchId);
+    mlShowPullCmd(batchId, migrateCode);
 }
 
-function mlShowPullCmd(batchId) {
+function mlShowPullCmd(batchId, migrateCode) {
     var card = document.getElementById('ml-pull-card');
     var el = document.getElementById('ml-pull-cmd');
     function sq(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
 
     var cmd = 'wp eval-file ' + sq(migrateLite.pullScript) + ' -- \\\n'
-        + '  --site-id=' + sq(migrateLite.siteId) + ' \\\n'
-        + '  --batch-id=' + sq(batchId) + ' \\\n'
+        + '  --code=' + sq(migrateCode || migrateLite.siteId + '/' + batchId) + ' \\\n'
         + '  --search=' + sq(migrateLite.siteUrl) + ' \\\n'
         + '  --replace="$(wp option get siteurl)" \\\n'
         + '  --search-path=' + sq(migrateLite.abspath) + ' \\\n'
@@ -71,6 +72,7 @@ function mlShowPullCmd(batchId) {
 }
 
 // Show pull command on page load if last batch exists
-if (migrateLite.lastBatch) {
-    mlShowPullCmd(migrateLite.lastBatch);
+if (migrateLite.lastCode) {
+    var parts = migrateLite.lastCode.split('/');
+    mlShowPullCmd(parts[1] || '', migrateLite.lastCode);
 }

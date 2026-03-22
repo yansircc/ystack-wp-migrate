@@ -54,10 +54,10 @@ class ML_Admin {
                 <h2>Pull from R2</h2>
                 <p class="description">Run this command on the target site to pull data from R2.</p>
                 <table class="form-table">
-                    <tr><th>Source Site ID</th><td><input type="text" id="ml-pull-site-id" class="regular-text" placeholder="<?php echo $site_id; ?>" value="<?php echo esc_attr($site_id); ?>" /></td></tr>
+                    <tr><th>Source Site ID</th><td><input type="text" id="ml-pull-site-id" class="regular-text" placeholder="e.g. <?php echo $site_id; ?>" /></td></tr>
                     <tr><th>Batch ID</th><td><input type="text" id="ml-pull-batch-id" class="regular-text" placeholder="from push output" /></td></tr>
-                    <tr><th>Source URL</th><td><input type="url" id="ml-pull-source-url" class="regular-text" placeholder="<?php echo home_url(); ?>" value="<?php echo esc_attr(home_url()); ?>" /></td></tr>
-                    <tr><th>Source Server Path</th><td><input type="text" id="ml-pull-source-path" class="regular-text" placeholder="<?php echo rtrim(ABSPATH, '/'); ?>" value="<?php echo esc_attr(rtrim(ABSPATH, '/')); ?>" /></td></tr>
+                    <tr><th>Source URL</th><td><input type="url" id="ml-pull-source-url" class="regular-text" placeholder="https://source-site.com" /></td></tr>
+                    <tr><th>Source Server Path</th><td><input type="text" id="ml-pull-source-path" class="regular-text" placeholder="/home/user/public_html (optional)" /></td></tr>
                 </table>
                 <p><button class="button" onclick="mlGenPullCmd()">Generate Pull Command</button></p>
                 <div id="ml-pull-cmd" class="ml-log" style="display:none"></div>

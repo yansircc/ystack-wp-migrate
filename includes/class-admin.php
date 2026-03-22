@@ -1,9 +1,6 @@
 <?php
 /**
- * Admin page: settings, Push/Pull UI, AJAX handlers.
- *
- * All business methods throw RuntimeException on failure.
- * AJAX handlers catch and route to wp_send_json_error.
+ * Admin page: settings, Push GUI, Pull command generator.
  */
 class ML_Admin {
 
@@ -11,7 +8,6 @@ class ML_Admin {
         add_action('admin_menu', [$this, 'register_page']);
         add_action('wp_ajax_migrate_lite_save_settings', [$this, 'ajax_save_settings']);
         add_action('wp_ajax_migrate_lite_push_step',     [$this, 'ajax_push_step']);
-        add_action('wp_ajax_migrate_lite_pull_step',     [$this, 'ajax_pull_step']);
     }
 
     public function register_page(): void {
@@ -22,6 +18,7 @@ class ML_Admin {
         $worker_url = get_option('migrate_lite_worker_url', '');
         $auth_token = get_option('migrate_lite_auth_token', '');
         $site_id    = sanitize_title(parse_url(home_url(), PHP_URL_HOST));
+        $plugin_dir = plugin_dir_path(dirname(__FILE__));
 
         ?>
         <style><?php readfile(ML_PATH . 'assets/admin.css'); ?></style>
@@ -47,22 +44,22 @@ class ML_Admin {
 
             <div class="ml-card">
                 <h2>Push to R2</h2>
-                <p class="description">Export this site's database and files to R2 for another site to pull.</p>
+                <p class="description">Export this site's database and files to R2.</p>
                 <p><button class="button-primary" onclick="mlPush()">Push Full Site</button></p>
                 <div id="ml-push-log" class="ml-log" style="display:none"></div>
             </div>
 
             <div class="ml-card">
                 <h2>Pull from R2</h2>
-                <p class="description">Import another site's data from R2 into this site.</p>
+                <p class="description">Run this command on the target site to pull data from R2.</p>
                 <table class="form-table">
-                    <tr><th>Source Site ID</th><td><input type="text" id="ml-pull-site-id" class="regular-text" placeholder="e.g. <?php echo $site_id; ?>" /></td></tr>
+                    <tr><th>Source Site ID</th><td><input type="text" id="ml-pull-site-id" class="regular-text" placeholder="<?php echo $site_id; ?>" value="<?php echo esc_attr($site_id); ?>" /></td></tr>
                     <tr><th>Batch ID</th><td><input type="text" id="ml-pull-batch-id" class="regular-text" placeholder="from push output" /></td></tr>
-                    <tr><th>Source URL</th><td><input type="url" id="ml-pull-source-url" class="regular-text" placeholder="https://source-site.com" /></td></tr>
-                    <tr><th>Source Server Path</th><td><input type="text" id="ml-pull-source-path" class="regular-text" placeholder="/home/user/public_html (optional)" /></td></tr>
+                    <tr><th>Source URL</th><td><input type="url" id="ml-pull-source-url" class="regular-text" placeholder="<?php echo home_url(); ?>" value="<?php echo esc_attr(home_url()); ?>" /></td></tr>
+                    <tr><th>Source Server Path</th><td><input type="text" id="ml-pull-source-path" class="regular-text" placeholder="<?php echo rtrim(ABSPATH, '/'); ?>" value="<?php echo esc_attr(rtrim(ABSPATH, '/')); ?>" /></td></tr>
                 </table>
-                <p><button class="button-primary" onclick="mlPull()">Pull Full Site</button></p>
-                <div id="ml-pull-log" class="ml-log" style="display:none"></div>
+                <p><button class="button" onclick="mlGenPullCmd()">Generate Pull Command</button></p>
+                <div id="ml-pull-cmd" class="ml-log" style="display:none"></div>
             </div>
         </div>
 
@@ -73,10 +70,8 @@ class ML_Admin {
     public function ajax_save_settings(): void {
         check_ajax_referer('migrate_lite', 'nonce');
         if (!current_user_can('manage_options')) wp_send_json_error('Forbidden');
-
         update_option('migrate_lite_worker_url', sanitize_url($_POST['worker_url']));
         update_option('migrate_lite_auth_token', sanitize_text_field($_POST['auth_token']));
-
         wp_send_json_success('Saved');
     }
 
@@ -88,17 +83,13 @@ class ML_Admin {
 
         try {
             $step = sanitize_text_field($_POST['step'] ?? '');
-
-            if ($step === 'init') {
-                wp_send_json_success(['batch_id' => ML_Push::init_batch()]);
-                return;
-            }
-
             $batch_id = sanitize_text_field($_POST['batch_id'] ?? '');
-            if (!$batch_id) wp_send_json_error('batch_id required');
             $push = new ML_Push($this->r2(), $batch_id);
 
             switch ($step) {
+                case 'init':
+                    wp_send_json_success(['batch_id' => $push->batch_id()]);
+                    break;
                 case 'db':
                     wp_send_json_success($push->db());
                     break;
@@ -110,50 +101,6 @@ class ML_Admin {
                 case 'manifest':
                     wp_send_json_success($push->commit_manifest());
                     break;
-                default:
-                    wp_send_json_error('Unknown step');
-            }
-        } catch (\Throwable $e) {
-            wp_send_json_error($e->getMessage());
-        }
-    }
-
-    public function ajax_pull_step(): void {
-        // Main plugin only handles download + import_db (pre-import steps).
-        // These always require admin nonce — never token auth.
-        // Post-import steps (extract/replace/flush) are handled by mu-plugin.
-        check_ajax_referer('migrate_lite', 'nonce');
-        if (!current_user_can('manage_options')) wp_send_json_error('Forbidden');
-
-        @set_time_limit(0);
-        @ini_set('memory_limit', '512M');
-
-        try {
-            $pull = new ML_Pull($this->r2());
-            $step = sanitize_text_field($_POST['step'] ?? '');
-
-            switch ($step) {
-                case 'download':
-                    $site_id  = sanitize_text_field($_POST['site_id'] ?? '');
-                    $batch_id = sanitize_text_field($_POST['batch_id'] ?? '');
-                    if (!$site_id || !$batch_id) throw new RuntimeException('site_id and batch_id required');
-                    $result = $pull->download($site_id, $batch_id);
-                    // Artifacts verified — now arm the session.
-                    // Persist operator state while we still have admin access.
-                    $user = wp_get_current_user();
-                    $operator = json_encode([
-                        'login' => $user->user_login,
-                        'pass'  => $user->user_pass,
-                        'email' => $user->user_email,
-                    ]);
-                    ML_DB::write_file(ML_DB::storage_dir() . '/operator', $operator);
-                    ML_DB::write_file(ML_DB::storage_dir() . '/plugin-basename', plugin_basename(ML_PATH . 'wp-migrate-lite.php'));
-                    $pull_token = bin2hex(random_bytes(32));
-                    ML_DB::write_file(ML_DB::storage_dir() . '/pull-token', $pull_token);
-                    ML_MU_Deployer::deploy();
-                    wp_send_json_success(['msg' => $result, 'pull_token' => $pull_token]);
-                    break;
-                // import_db onward handled by mu-plugin (token auth)
                 default:
                     wp_send_json_error('Unknown step');
             }

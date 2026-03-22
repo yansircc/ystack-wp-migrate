@@ -28,7 +28,6 @@ async function mlPush() {
     var log = 'ml-push-log';
     document.getElementById(log).innerHTML = '';
 
-    // Init batch
     var r = await mlAjax('push_step', { step: 'init' });
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
     var batchId = r.data.batch_id;
@@ -42,88 +41,51 @@ async function mlPush() {
     ];
 
     for (var i = 0; i < steps.length; i++) {
-        mlLog(log, '⏳ Pushing ' + steps[i].label + '...', 'ml-step');
+        mlLog(log, '⏳ ' + steps[i].label + '...', 'ml-step');
         r = await mlAjax('push_step', { step: steps[i].step, batch_id: batchId });
-        if (r.success) {
-            mlLog(log, '✓ ' + r.data, 'ml-ok');
-        } else {
-            mlLog(log, '✗ ' + r.data, 'ml-err');
-            return;
-        }
+        if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
+        mlLog(log, '✓ ' + r.data, 'ml-ok');
     }
 
-    // Commit manifest
-    mlLog(log, '⏳ Committing manifest...', 'ml-step');
+    mlLog(log, '⏳ Manifest...', 'ml-step');
     r = await mlAjax('push_step', { step: 'manifest', batch_id: batchId });
     if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
     mlLog(log, '✓ ' + r.data, 'ml-ok');
-    mlLog(log, '🎉 Push complete! Site ID: ' + migrateLite.siteId + ', Batch: ' + batchId, 'ml-ok');
+    mlLog(log, '🎉 Push complete! Site: ' + migrateLite.siteId + ' / Batch: ' + batchId, 'ml-ok');
+
+    // Auto-fill pull command batch ID
+    var batchInput = document.getElementById('ml-pull-batch-id');
+    if (batchInput) batchInput.value = batchId;
 }
 
-async function mlPull() {
-    var log = 'ml-pull-log';
-    document.getElementById(log).innerHTML = '';
-    var siteId     = document.getElementById('ml-pull-site-id').value;
-    var batchId    = document.getElementById('ml-pull-batch-id').value;
-    var sourceUrl  = document.getElementById('ml-pull-source-url').value;
-    var sourcePath = document.getElementById('ml-pull-source-path').value;
-    var pullToken  = '';
+function mlGenPullCmd() {
+    var el = document.getElementById('ml-pull-cmd');
+    var siteId = document.getElementById('ml-pull-site-id').value;
+    var batchId = document.getElementById('ml-pull-batch-id').value;
+    var srcUrl = document.getElementById('ml-pull-source-url').value;
+    var srcPath = document.getElementById('ml-pull-source-path').value;
+    var workerUrl = document.getElementById('ml-worker-url').value;
+    var token = document.getElementById('ml-auth-token').value;
 
-    if (!siteId || !batchId || !sourceUrl) { alert('Site ID, Batch ID, and Source URL are required'); return; }
-
-    // 1. Download from R2 by manifest (creates pull token)
-    mlLog(log, '⏳ Downloading from R2...', 'ml-step');
-    var r = await mlAjax('pull_step', { step: 'download', site_id: siteId, batch_id: batchId });
-    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
-    pullToken = r.data.pull_token;
-    mlLog(log, '✓ ' + r.data.msg, 'ml-ok');
-
-    // 2. Import DB (after this, nonce + session invalid — use pullToken)
-    mlLog(log, '⏳ Importing database...', 'ml-step');
-    r = await mlAjax('pull_step', { step: 'import_db', site_id: siteId, pull_token: pullToken });
-    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
-    mlLog(log, '✓ ' + r.data, 'ml-ok');
-
-    // 3. Post-import prepare: restore operator + park plugins (mu-plugin)
-    mlLog(log, '⏳ Preparing environment...', 'ml-step');
-    r = await mlAjax('pull_step', { step: 'prepare', site_id: siteId, pull_token: pullToken });
-    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
-    mlLog(log, '✓ ' + r.data, 'ml-ok');
-
-    // 4. Extract files (mu-plugin)
-    mlLog(log, '⏳ Extracting files...', 'ml-step');
-    r = await mlAjax('pull_step', { step: 'extract', site_id: siteId, pull_token: pullToken });
-    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
-    mlLog(log, '✓ ' + r.data, 'ml-ok');
-
-    // 5. Search-replace per table (mu-plugin)
-    mlLog(log, '⏳ Starting search-replace...', 'ml-step');
-    r = await mlAjax('pull_step', { step: 'get_tables', site_id: siteId, source_url: sourceUrl, pull_token: pullToken });
-    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
-    var tables = r.data;
-    mlLog(log, tables.length + ' tables to process', 'ml-info');
-
-    for (var i = 0; i < tables.length; i++) {
-        var pct = Math.round((i + 1) / tables.length * 100);
-        r = await mlAjax('pull_step', {
-            step: 'replace_table',
-            table: tables[i],
-            source_url: sourceUrl,
-            source_path: sourcePath,
-            site_id: siteId,
-            pull_token: pullToken
-        });
-        if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
-        if (r.data.indexOf(': 0 ') === -1) {
-            mlLog(log, '  [' + pct + '%] ' + r.data, 'ml-ok');
-        }
+    if (!siteId || !batchId || !srcUrl) {
+        alert('Site ID, Batch ID, and Source URL are required');
+        return;
     }
 
-    // 5. Flush (handled by mu-plugin, which self-deletes)
-    mlLog(log, '⏳ Flushing caches...', 'ml-step');
-    r = await mlAjax('pull_step', { step: 'flush', site_id: siteId, pull_token: pullToken });
-    if (!r.success) { mlLog(log, '✗ ' + r.data, 'ml-err'); return; }
-    mlLog(log, '✓ ' + r.data, 'ml-ok');
+    var cmd = 'wp eval-file wp-content/plugins/wp-migrate-lite/pull-cli.php -- \\\n'
+        + '  --worker=' + workerUrl + ' \\\n'
+        + '  --token=' + token + ' \\\n'
+        + '  --site-id=' + siteId + ' \\\n'
+        + '  --batch-id=' + batchId + ' \\\n'
+        + '  --search=' + srcUrl + ' \\\n'
+        + '  --replace=$(wp option get siteurl)';
 
-    mlLog(log, '🎉 Pull complete! Site migrated.', 'ml-ok');
+    if (srcPath) {
+        cmd += ' \\\n  --search-path=' + srcPath + ' \\\n'
+            + '  --replace-path=$(wp eval "echo rtrim(ABSPATH, \'/\');")';
+    }
+
+    el.style.display = 'block';
+    el.innerHTML = '<div class="ml-info">Run this on the target site:</div>'
+        + '<pre style="white-space:pre-wrap;word-break:break-all;user-select:all">' + cmd + '</pre>';
 }

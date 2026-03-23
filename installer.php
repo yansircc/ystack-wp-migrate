@@ -1,13 +1,14 @@
 <?php
 /**
- * WP Migrate Lite — Standalone Installer
+ * YStack WP Migrate — Standalone Installer
  *
  * Upload to target site root. Access via browser. Self-deletes after migration.
  * Only requires: Installer Token + Migration Code (from push output).
  */
 
-define('R2_WORKER', 'https://wp-migrate-proxy.yansir.workers.dev');
-define('R2_TOKEN', '0e7ddc9b3956aafba3b24a1c39d7775edbcb6887f20bc873594ce376b8e219dc');
+define('YSWM_R2_WORKER', '');
+define('YSWM_R2_TOKEN', '');
+if (!defined('YSWM_CODE')) define('YSWM_CODE', '');
 
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
@@ -43,7 +44,7 @@ if (!$wp_content_proven && !$has_define && is_dir($wp_content)) $wp_content_prov
 
 // Storage
 $install_hash = substr(md5(realpath($site_root) ?: $site_root), 0, 12);
-$tmp_dir = sys_get_temp_dir() . '/.migrate-installer-' . $install_hash;
+$tmp_dir = sys_get_temp_dir() . '/.yswm-installer-' . $install_hash;
 
 // ============================================================
 // AJAX
@@ -88,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
     $mysqli->set_charset('utf8mb4');
 
     if (!is_dir($tmp_dir)) @mkdir($tmp_dir, 0755, true);
-    $engine = new ML_Pull_Engine($mysqli, $prefix, $wp_content, $tmp_dir);
+    $engine = new YSWM_Pull_Engine($mysqli, $prefix, $wp_content, $tmp_dir);
 
     try {
         switch ($step) {
@@ -105,23 +106,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                     if ($written === false || $written < $len) throw new RuntimeException('Failed to save target siteurl');
                 }
 
-                // Download artifacts
-                $dl = $engine->download(R2_WORKER, R2_TOKEN, $mc_site_id, $mc_batch_id);
+                // Download with token verification (fails before artifacts if token is wrong)
+                $dl = $engine->download(YSWM_R2_WORKER, YSWM_R2_TOKEN, $mc_site_id, $mc_batch_id, $mc_token);
 
-                // Re-fetch manifest to verify token and get source info
-                $ch = curl_init(R2_WORKER . "/{$mc_site_id}/{$mc_batch_id}/manifest.json");
-                curl_setopt_array($ch, [CURLOPT_HTTPHEADER => ["Authorization: Bearer " . R2_TOKEN],
-                    CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30]);
-                $mdata = curl_exec($ch); curl_close($ch);
-                $manifest = json_decode($mdata, true) ?: [];
-
-                // Verify installer token from manifest
-                if (($manifest['installer_token'] ?? '') !== $mc_token) {
-                    throw new RuntimeException('Invalid migration code — token mismatch');
+                // Read manifest from saved file
+                $mraw = @file_get_contents($tmp_dir . '/manifest.json');
+                if ($mraw === false) throw new RuntimeException('Cannot read persisted manifest');
+                $manifest = json_decode($mraw, true);
+                if (!$manifest || empty($manifest['source_url']) || empty($manifest['source_path'])) {
+                    throw new RuntimeException('Persisted manifest missing source_url or source_path');
                 }
 
                 // Cache token for subsequent steps
-                @file_put_contents($token_file, $mc_token);
+                $tw = @file_put_contents($token_file, $mc_token);
+                if ($tw === false || $tw !== strlen($mc_token)) {
+                    throw new RuntimeException('Failed to cache installer token');
+                }
 
                 echo json_encode(['ok' => true, 'msg' => implode(', ', $dl),
                     'source_url' => $manifest['source_url'] ?? '',
@@ -172,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
 <html>
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WP Migrate Lite — Installer</title>
+<title>YStack WP Migrate — Installer</title>
 <meta name="robots" content="noindex,nofollow">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#1e1e2e;color:#cdd6f4;padding:2rem}
@@ -185,11 +185,16 @@ button{background:#89b4fa;color:#1e1e2e;border:none;padding:.6rem 1.5rem;border-
 </style>
 </head>
 <body>
-<h1>WP Migrate Lite — Installer</h1>
+<h1>YStack WP Migrate — Installer</h1>
 <div class="card">
+<?php if (YSWM_CODE): ?>
+    <input type="hidden" id="code" value="<?php echo htmlspecialchars(YSWM_CODE); ?>">
+    <p style="color:#a6e3a1;font-size:.9rem">Migration code pre-configured. Click to start.</p>
+<?php else: ?>
     <label>Migration Code</label>
     <input type="text" id="code" placeholder="Paste the code from Push output">
     <div class="hint">One code contains everything needed to migrate</div>
+<?php endif; ?>
 <?php if (!$wp_content_proven): ?>
     <label>WP Content Path</label>
     <input type="text" id="wpcontentdir" placeholder="e.g. <?php echo htmlspecialchars($wp_content); ?>">
@@ -253,7 +258,7 @@ async function run(){
  * Shared by pull-cli.php (WP-CLI) and installer.php (standalone).
  * No WordPress dependency. Requires a mysqli connection and wp-content path.
  */
-class ML_Pull_Engine {
+class YSWM_Pull_Engine {
 
     private $mysqli;
     private string $prefix;
@@ -272,10 +277,10 @@ class ML_Pull_Engine {
     // Download
     // ============================================================
 
-    public function download(string $worker, string $token, string $site_id, string $batch_id): array {
+    public function download(string $worker, string $token, string $site_id, string $batch_id, string $installer_token = ''): array {
         $prefix = "{$site_id}/{$batch_id}";
 
-        // Manifest
+        // Manifest — download and verify BEFORE artifacts
         $manifest_raw = $this->r2_get($worker, $token, "{$prefix}/manifest.json");
         $manifest = json_decode($manifest_raw, true);
         if (!$manifest || ($manifest['batch_id'] ?? '') !== $batch_id) {
@@ -283,6 +288,22 @@ class ML_Pull_Engine {
         }
         if (($manifest['site_id'] ?? '') !== $site_id) {
             throw new RuntimeException('Manifest site_id mismatch');
+        }
+        if ($installer_token !== '' && ($manifest['installer_token'] ?? '') !== $installer_token) {
+            throw new RuntimeException('Invalid migration code — token mismatch');
+        }
+        if (empty($manifest['source_url']) || empty($manifest['source_path'])) {
+            throw new RuntimeException('Manifest missing source_url or source_path');
+        }
+        if (empty($manifest['artifacts']) || !is_array($manifest['artifacts'])) {
+            throw new RuntimeException('Manifest missing or invalid artifacts');
+        }
+
+        // Save manifest for caller to read source_url/source_path
+        $mpath = "{$this->tmp_dir}/manifest.json";
+        $written = @file_put_contents($mpath, $manifest_raw);
+        if ($written === false || $written !== strlen($manifest_raw)) {
+            throw new RuntimeException('Failed to persist manifest');
         }
 
         $results = [];

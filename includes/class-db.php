@@ -6,7 +6,7 @@
  * Export strips the source prefix, import applies the target prefix.
  * All write operations use mysqli directly.
  */
-class ML_DB {
+class YSWM_DB {
 
     /**
      * Export tables owned by this WordPress install.
@@ -30,7 +30,7 @@ class ML_DB {
             }
         };
 
-        $w("-- ML_SOURCE_PREFIX: {$prefix}\n\n");
+        $w("-- YSWM_SOURCE_PREFIX: {$prefix}\n\n");
 
         $tables = self::owned_tables(); // throws on DB error
 
@@ -168,8 +168,8 @@ class ML_DB {
      * Migration storage root — must be outside the web document root.
      *
      * Resolution:
-     * 1. MIGRATE_LITE_STORAGE_DIR constant (explicit config, always trusted)
-     * 2. dirname(ABSPATH) . '/.migrate-lite' — only if provably outside document root
+     * 1. YSWM_STORAGE_DIR constant (explicit config, always trusted)
+     * 2. dirname(ABSPATH) . '/.yswm-migrate' — only if provably outside document root
      * 3. Hard fail with instructions to configure
      *
      * On first call, probes write access. No fallback to webroot.
@@ -178,17 +178,17 @@ class ML_DB {
         static $resolved = null;
         if ($resolved !== null) return $resolved;
 
-        if (defined('MIGRATE_LITE_STORAGE_DIR')) {
-            $dir = MIGRATE_LITE_STORAGE_DIR;
+        if (defined('YSWM_STORAGE_DIR')) {
+            $dir = YSWM_STORAGE_DIR;
         } else {
             // Build candidate from canonical parent of ABSPATH
             $parent_real = realpath(dirname(ABSPATH));
             if ($parent_real === false) {
                 throw new RuntimeException(
-                    "Cannot resolve parent of ABSPATH — define MIGRATE_LITE_STORAGE_DIR in wp-config.php"
+                    "Cannot resolve parent of ABSPATH — define YSWM_STORAGE_DIR in wp-config.php"
                 );
             }
-            $dir = $parent_real . '/.migrate-lite';
+            $dir = $parent_real . '/.yswm-migrate';
 
             // Prove candidate is outside document root.
             // Works in both web and CLI — docroot detection is attempted either way.
@@ -197,20 +197,20 @@ class ML_DB {
                 if (strpos($dir . '/', rtrim($docroot, '/') . '/') === 0) {
                     throw new RuntimeException(
                         "Default storage path ({$dir}) is inside document root ({$docroot}). "
-                        . "Define MIGRATE_LITE_STORAGE_DIR in wp-config.php to set a path outside the webroot."
+                        . "Define YSWM_STORAGE_DIR in wp-config.php to set a path outside the webroot."
                     );
                 }
             } else {
                 // Cannot determine docroot — use system temp dir scoped to this install
                 $install_hash = substr(md5(realpath(ABSPATH) ?: ABSPATH), 0, 12);
-                $dir = sys_get_temp_dir() . '/.migrate-lite-' . $install_hash;
+                $dir = sys_get_temp_dir() . '/.yswm-migrate-' . $install_hash;
             }
         }
 
         if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
             throw new RuntimeException(
                 "Cannot create migration storage: {$dir} — "
-                . "define MIGRATE_LITE_STORAGE_DIR in wp-config.php to set a writable path"
+                . "define YSWM_STORAGE_DIR in wp-config.php to set a writable path"
             );
         }
 
@@ -219,7 +219,7 @@ class ML_DB {
         if (@file_put_contents($probe, 'ok') === false || @file_get_contents($probe) !== 'ok') {
             throw new RuntimeException(
                 "Migration storage not writable: {$dir} — "
-                . "define MIGRATE_LITE_STORAGE_DIR in wp-config.php to set a writable path"
+                . "define YSWM_STORAGE_DIR in wp-config.php to set a writable path"
             );
         }
         @unlink($probe);

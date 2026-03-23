@@ -5,7 +5,7 @@
  * Shared by pull-cli.php (WP-CLI) and installer.php (standalone).
  * No WordPress dependency. Requires a mysqli connection and wp-content path.
  */
-class ML_Pull_Engine {
+class YSWM_Pull_Engine {
 
     private $mysqli;
     private string $prefix;
@@ -24,10 +24,10 @@ class ML_Pull_Engine {
     // Download
     // ============================================================
 
-    public function download(string $worker, string $token, string $site_id, string $batch_id): array {
+    public function download(string $worker, string $token, string $site_id, string $batch_id, string $installer_token = ''): array {
         $prefix = "{$site_id}/{$batch_id}";
 
-        // Manifest
+        // Manifest — download and verify BEFORE artifacts
         $manifest_raw = $this->r2_get($worker, $token, "{$prefix}/manifest.json");
         $manifest = json_decode($manifest_raw, true);
         if (!$manifest || ($manifest['batch_id'] ?? '') !== $batch_id) {
@@ -35,6 +35,22 @@ class ML_Pull_Engine {
         }
         if (($manifest['site_id'] ?? '') !== $site_id) {
             throw new RuntimeException('Manifest site_id mismatch');
+        }
+        if ($installer_token !== '' && ($manifest['installer_token'] ?? '') !== $installer_token) {
+            throw new RuntimeException('Invalid migration code — token mismatch');
+        }
+        if (empty($manifest['source_url']) || empty($manifest['source_path'])) {
+            throw new RuntimeException('Manifest missing source_url or source_path');
+        }
+        if (empty($manifest['artifacts']) || !is_array($manifest['artifacts'])) {
+            throw new RuntimeException('Manifest missing or invalid artifacts');
+        }
+
+        // Save manifest for caller to read source_url/source_path
+        $mpath = "{$this->tmp_dir}/manifest.json";
+        $written = @file_put_contents($mpath, $manifest_raw);
+        if ($written === false || $written !== strlen($manifest_raw)) {
+            throw new RuntimeException('Failed to persist manifest');
         }
 
         $results = [];

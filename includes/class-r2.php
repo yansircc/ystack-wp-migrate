@@ -1,24 +1,31 @@
 <?php
 /**
  * R2 Worker HTTP client — PUT/GET/DELETE via CF Worker proxy.
+ *
+ * Configuration: define YSWM_R2_WORKER and YSWM_R2_TOKEN in wp-config.php.
  * Throws RuntimeException on I/O or cURL failures.
  */
-class ML_R2 {
-
-    // Built-in R2 credentials — no user configuration needed
-    private const DEFAULT_WORKER = 'https://wp-migrate-proxy.yansir.workers.dev';
-    private const DEFAULT_TOKEN  = '0e7ddc9b3956aafba3b24a1c39d7775edbcb6887f20bc873594ce376b8e219dc';
+class YSWM_R2 {
 
     private string $worker_url;
     private string $auth_token;
 
     public function __construct(string $worker_url = '', string $auth_token = '') {
-        $this->worker_url = rtrim($worker_url ?: self::DEFAULT_WORKER, '/');
-        $this->auth_token = $auth_token ?: self::DEFAULT_TOKEN;
+        $this->worker_url = rtrim($worker_url ?: self::worker(), '/');
+        $this->auth_token = $auth_token ?: self::token();
     }
 
-    public static function default_worker(): string { return self::DEFAULT_WORKER; }
-    public static function default_token(): string { return self::DEFAULT_TOKEN; }
+    public static function worker(): string {
+        return defined('YSWM_R2_WORKER') ? YSWM_R2_WORKER : '';
+    }
+
+    public static function token(): string {
+        return defined('YSWM_R2_TOKEN') ? YSWM_R2_TOKEN : '';
+    }
+
+    public static function is_configured(): bool {
+        return self::worker() !== '' && self::token() !== '';
+    }
 
     public function put(string $key, string $file_path): int {
         $fp = @fopen($file_path, 'r');
@@ -66,7 +73,7 @@ class ML_R2 {
             $err = curl_error($ch);
             curl_close($ch);
             fclose($fp);
-            @unlink($dest_path); // Remove truncated file
+            @unlink($dest_path);
             throw new RuntimeException("cURL download failed: {$err}");
         }
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);

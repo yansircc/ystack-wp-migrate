@@ -3,14 +3,14 @@
  * Push: export this site to R2. Stateless — no batch state file, no locks.
  * Manifest is the only commit record.
  */
-class ML_Push {
+class YSWM_Push {
 
-    private ML_R2 $r2;
+    private YSWM_R2 $r2;
     private string $batch_id;
 
     private const ARTIFACTS = ['dump.sql', 'uploads.zip', 'themes.zip', 'plugins.zip'];
 
-    public function __construct(ML_R2 $r2, string $batch_id = '') {
+    public function __construct(YSWM_R2 $r2, string $batch_id = '') {
         $this->r2 = $r2;
         $this->batch_id = $batch_id ?: date('Ymd-His') . '-' . bin2hex(random_bytes(4));
     }
@@ -26,9 +26,9 @@ class ML_Push {
     }
 
     public function db(): string {
-        $tmp = tempnam(ML_DB::tmp_dir(), 'mig');
+        $tmp = tempnam(YSWM_DB::tmp_dir(), 'mig');
         try {
-            $size = ML_DB::export($tmp);
+            $size = YSWM_DB::export($tmp);
             $code = $this->r2->put($this->key('dump.sql'), $tmp);
             if ($code !== 200) throw new RuntimeException("R2 upload failed (HTTP {$code})");
             return 'Database (' . round($size / 1048576, 1) . ' MB)';
@@ -39,7 +39,7 @@ class ML_Push {
 
     public function dir(string $dir_name): string {
         $base = WP_CONTENT_DIR . '/' . $dir_name;
-        $seed = tempnam(ML_DB::tmp_dir(), $dir_name);
+        $seed = tempnam(YSWM_DB::tmp_dir(), $dir_name);
         @unlink($seed);
         $tmp_zip = $seed . '.zip';
 
@@ -84,9 +84,9 @@ class ML_Push {
             'artifacts'       => self::ARTIFACTS,
             'created_at'      => gmdate('Y-m-d\TH:i:s\Z'),
         ]);
-        $tmp = tempnam(ML_DB::tmp_dir(), 'mfst');
+        $tmp = tempnam(YSWM_DB::tmp_dir(), 'mfst');
         try {
-            ML_DB::write_file($tmp, $manifest);
+            YSWM_DB::write_file($tmp, $manifest);
             $code = $this->r2->put($this->key('manifest.json'), $tmp);
             if ($code !== 200) throw new RuntimeException("Manifest upload failed (HTTP {$code})");
             return json_encode([

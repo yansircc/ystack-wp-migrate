@@ -2,7 +2,7 @@
 /**
  * R2 Worker HTTP client — PUT/GET/DELETE via CF Worker proxy.
  *
- * Configuration: define YSWM_R2_WORKER and YSWM_R2_TOKEN in wp-config.php.
+ * Config resolution: wp-config.php constants > wp_options.
  * Throws RuntimeException on I/O or cURL failures.
  */
 class YSWM_R2 {
@@ -16,11 +16,13 @@ class YSWM_R2 {
     }
 
     public static function worker(): string {
-        return defined('YSWM_R2_WORKER') ? YSWM_R2_WORKER : '';
+        if (defined('YSWM_R2_WORKER') && YSWM_R2_WORKER !== '') return YSWM_R2_WORKER;
+        return function_exists('get_option') ? get_option('yswm_r2_worker', '') : '';
     }
 
     public static function token(): string {
-        return defined('YSWM_R2_TOKEN') ? YSWM_R2_TOKEN : '';
+        if (defined('YSWM_R2_TOKEN') && YSWM_R2_TOKEN !== '') return YSWM_R2_TOKEN;
+        return function_exists('get_option') ? get_option('yswm_r2_token', '') : '';
     }
 
     public static function is_configured(): bool {

@@ -3,7 +3,7 @@
 Plugin Name: YStack WP Migrate
 Plugin URI: https://github.com/yansircc/ystack-wp-migrate
 Description: Push/Pull WordPress sites via S3-compatible storage (Cloudflare R2).
-Version: 3.0.0
+Version: 0.1.0
 Author: YStack
 Author URI: https://github.com/yansircc
 License: GPL-2.0-or-later

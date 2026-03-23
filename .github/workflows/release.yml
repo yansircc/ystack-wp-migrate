@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build plugin zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SLUG="ystack-wp-migrate"
+          mkdir -p build/${SLUG}
+          cp -r includes assets installer.php pull-cli.php ystack-wp-migrate.php README.md LICENSE build/${SLUG}/
+          cd build && zip -r ../${SLUG}-${VERSION}.zip ${SLUG}/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ystack-wp-migrate-*.zip
+          generate_release_notes: true
